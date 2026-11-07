@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiSignatures, normalizeDom, type NetworkEntry } from '../src/normalize.ts';
+import { apiSignatures, networkSignatures, normalizeDom, type NetworkEntry } from '../src/normalize.ts';
 
 test('정규화: /_app/immutable 자산 해시를 HASH 로 바꾼다', () => {
   const a = normalizeDom('<script type="module" src="/_app/immutable/entry/app.Bq7x2kLm.js"></script>');
@@ -66,4 +66,53 @@ test('네트워크 요약: 호스트가 달라도 path 만 비교하므로 같�
   const a = apiSignatures([entry(0, 'GET', 'http://127.0.0.1:1111/api/a', 'fetch', 200)]);
   const b = apiSignatures([entry(0, 'GET', 'http://127.0.0.1:2222/api/a', 'fetch', 200)]);
   assert.deepEqual(a, b);
+});
+
+test('정규화: src/href 와 import() 의 ./ ../ 접두어를 / 로 통일하고 그 뒤 해시도 지운다', () => {
+  // adapter-node 가 낸 깊이 1 라우트 셸(../)과 adapter-static 셸(/)이 같아져야 한다.
+  const node =
+    '<link rel="icon" href="../favicon.svg"><link href="../_app/immutable/assets/0.fNpmUB9v.css" rel="stylesheet"><script>import("../_app/immutable/entry/start.B-1wuyzR.js")</script>';
+  const stat =
+    '<link rel="icon" href="/favicon.svg"><link href="/_app/immutable/assets/0.fNpmUB9v.css" rel="stylesheet"><script>import("/_app/immutable/entry/start.CwooYa2t.js")</script>';
+  assert.equal(normalizeDom(node), normalizeDom(stat));
+  assert.equal(normalizeDom('<img src="./a/b.png"> <a href=\'../../x\'>x</a>'), '<img src="/a/b.png"> <a href=\'/x\'>x</a>');
+  // 접두어가 아닌 점은 두고, 루트 경로는 그대로다.
+  assert.equal(normalizeDom('<a href="/a/./b">1</a><a href="/c">2</a>'), '<a href="/a/./b">1</a><a href="/c">2</a>');
+});
+
+test('정규화: adapter-node 인라인 부트의 base 계산식을 정적 빌드의 base: "" 로 맞춘다', () => {
+  const root = normalizeDom('<script>__sveltekit_r4zlwe = { base: new URL(".", location).pathname.slice(0, -1) };</script>');
+  const depth1 = normalizeDom('<script>__sveltekit_r4zlwe = { base: new URL("..", location).pathname.slice(0, -1) };</script>');
+  const depth2 = normalizeDom("<script>__sveltekit_r4zlwe = { base: new URL('../..', location).pathname.slice(0,-1) };</script>");
+  const stat = normalizeDom('<script>__sveltekit_1yqzt4i = { base: "" };</script>');
+  assert.equal(root, stat);
+  assert.equal(depth1, stat);
+  assert.equal(depth2, stat);
+  assert.equal(stat, '<script>__sveltekit_HASH = { base: "" };</script>');
+});
+
+test('네트워크 요약: 기본은 문서·/_app/ 자산·favicon 만 빼고 모든 요청을 순서대로 남긴다', () => {
+  const entries: NetworkEntry[] = [
+    entry(0, 'GET', 'http://127.0.0.1:1111/', 'document', 200),
+    entry(1, 'GET', 'http://127.0.0.1:1111/_app/immutable/entry/app.Bq7x2kLm.js', 'script', 200),
+    entry(2, 'GET', 'http://127.0.0.1:1111/api/hello?from=%2F', 'fetch', 200),
+    entry(3, 'GET', 'http://127.0.0.1:1111/favicon.svg', 'other', 200),
+    entry(4, 'GET', 'http://127.0.0.1:1111/apix/not-api', 'fetch', 200),
+    entry(5, 'GET', 'http://127.0.0.1:1111/fonts/a.woff2', 'font', 404),
+    entry(6, 'GET', 'http://127.0.0.1:1111/pull-requests/5', 'document', 200),
+    entry(7, 'POST', 'http://127.0.0.1:1111/api/runs/1/rerun', 'fetch'),
+  ];
+  assert.deepEqual(networkSignatures(entries), [
+    { method: 'GET', path: '/api/hello?from=%2F', status: 200 },
+    { method: 'GET', path: '/apix/not-api', status: 200 },
+    { method: 'GET', path: '/fonts/a.woff2', status: 404 },
+    { method: 'POST', path: '/api/runs/1/rerun', status: null },
+  ]);
+  // apiOnly 는 v0.1.0 동작(apiSignatures)과 같다.
+  assert.deepEqual(networkSignatures(entries, { apiOnly: true }), apiSignatures(entries));
+  assert.deepEqual(networkSignatures(entries, { apiOnly: true }), [
+    { method: 'GET', path: '/api/hello?from=%2F', status: 200 },
+    { method: 'POST', path: '/api/runs/1/rerun', status: null },
+  ]);
+  assert.deepEqual(networkSignatures(entries, { apiOnly: true, apiPrefix: '/apix/' }), [{ method: 'GET', path: '/apix/not-api', status: 200 }]);
 });

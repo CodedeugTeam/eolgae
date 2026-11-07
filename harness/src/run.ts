@@ -6,7 +6,7 @@ import { chromium, type Browser } from 'playwright';
 import { parseTarget, startTarget, type RunningTarget } from './targets.ts';
 import { startProxy, type RunningProxy } from './proxy.ts';
 import { collect, type Collected } from './collect.ts';
-import { apiSignatures, normalizeDom } from './normalize.ts';
+import { networkSignatures, normalizeDom } from './normalize.ts';
 import { compareConsole, compareDom, compareNetwork, compareScreenshots } from './compare.ts';
 import { buildReport, renderMarkdown, scenarioStatus, type Report, type ScenarioReport } from './report.ts';
 import { scenarioSlug, type Scenario, type ScenarioContext } from './scenario.ts';
@@ -184,16 +184,24 @@ async function compareAndWrite(
   const newDomPath = join(domDir, `${slug}.new.html`);
   await writeFile(oldDomPath, oldDom + '\n');
   await writeFile(newDomPath, newDom + '\n');
-  const dom = { ...compareDom(oldDom, newDom), files: { old: rel(oldDomPath), new: rel(newDomPath) } };
+  const dom = {
+    ...compareDom(oldDom, newDom),
+    files: { old: rel(oldDomPath), new: rel(newDomPath) },
+    ...(scenario.dom?.root !== undefined ? { root: scenario.dom.root } : {}),
+    ...(scenario.dom?.title ? { title: true } : {}),
+  };
 
   // 네트워크
   const oldNetPath = join(netDir, `${slug}.old.json`);
   const newNetPath = join(netDir, `${slug}.new.json`);
   await writeFile(oldNetPath, JSON.stringify({ requests: oldC.network, ws: oldC.ws }, null, 2) + '\n');
   await writeFile(newNetPath, JSON.stringify({ requests: newC.network, ws: newC.ws }, null, 2) + '\n');
+  const apiOnly = scenario.network?.apiOnly === true;
+  const sigOpts = { apiPrefix, apiOnly };
   const network = {
-    ...compareNetwork(apiSignatures(oldC.network, apiPrefix), apiSignatures(newC.network, apiPrefix)),
+    ...compareNetwork(networkSignatures(oldC.network, sigOpts), networkSignatures(newC.network, sigOpts)),
     files: { old: rel(oldNetPath), new: rel(newNetPath) },
+    scope: apiOnly ? ('api' as const) : ('all' as const),
   };
 
   const consoleCmp = compareConsole(oldC.console, newC.console);

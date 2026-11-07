@@ -15,10 +15,16 @@ export interface ScreenshotSkipped {
 
 export interface DomAxis extends DomComparison {
   files: { old: string; new: string };
+  /** scenario.dom.root 로 범위를 좁혔으면 그 selector */
+  root?: string;
+  /** scenario.dom.title 로 <title> 을 함께 비교했으면 true */
+  title?: boolean;
 }
 
 export interface NetworkAxis extends NetworkComparison {
   files: { old: string; new: string };
+  /** 'api' 는 apiPrefix 요청만, 'all' 은 문서·/_app/ 자산·favicon 을 뺀 전체. 없으면 v0.1.0 보고서('api') */
+  scope?: 'all' | 'api';
 }
 
 export interface WsAxis {
@@ -131,7 +137,7 @@ export function renderMarkdown(report: Report): string {
   lines.push('');
   lines.push('## 시나리오 × 축');
   lines.push('');
-  lines.push('| 시나리오 | 스크린샷 | DOM | 네트워크(/api 순서) | 콘솔 에러 | WebSocket(수집만) |');
+  lines.push('| 시나리오 | 스크린샷 | DOM | 네트워크(요청 순서) | 콘솔 에러 | WebSocket(수집만) |');
   lines.push('|---|---|---|---|---|---|');
   for (const s of report.scenarios) {
     if (s.status === 'error') {
@@ -181,6 +187,7 @@ export function renderMarkdown(report: Report): string {
       if (s.dom && !s.dom.equal) {
         lines.push('#### DOM (정규화 뒤)');
         lines.push('');
+        if (s.dom.root !== undefined) lines.push(`- 범위: \`${s.dom.root}\`${s.dom.title ? ' + <title>' : ''}`);
         lines.push(`- 길이: old ${s.dom.oldLength}, new ${s.dom.newLength}`);
         if (s.dom.excerpt) {
           lines.push(`- 첫 차이 위치: ${s.dom.excerpt.index}`);
@@ -201,8 +208,9 @@ export function renderMarkdown(report: Report): string {
         lines.push('');
       }
       if (s.network && !s.network.equal) {
-        lines.push('#### 네트워크 (/api 요청 순서)');
+        lines.push('#### 네트워크 (요청 순서)');
         lines.push('');
+        lines.push(`- 범위: ${s.network.scope === 'all' ? '문서·/_app/ 자산·favicon 을 뺀 전체 요청' : `\`${report.targets.apiPrefix}\` 요청만`}`);
         if (s.network.firstDiffIndex !== undefined) lines.push(`- 처음 어긋난 위치: ${s.network.firstDiffIndex}`);
         lines.push('');
         lines.push('| # | old | new |');
