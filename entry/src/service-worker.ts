@@ -205,7 +205,9 @@ async function buildServiceWorker(input: { config: ResolvedConfig; src: string; 
         output: {
           entryFileNames: emitName,
           ...(mainAssetFileNames !== undefined ? { assetFileNames: mainAssetFileNames } : {}),
-          ...(isRolldown ? {} : { inlineDynamicImports: true }),
+          // 서비스 워커 안의 import() 는 HTML 명세상 금지라 동적 import 를 한 파일로 인라인한다(두 축 같은 꼴).
+          // SvelteKit 은 Vite 8 에서 청크를 따로 내 서비스 워커가 실행 중 실패한다. 이 설정은 2차 빌드에만 들어간다.
+          ...(isRolldown ? { codeSplitting: false } : { inlineDynamicImports: true }),
         },
       } as NonNullable<InlineConfig['build']>['rollupOptions'],
     },

@@ -7,9 +7,11 @@ import { eolgae } from '../../src/plugin.ts';
 const outDir = process.env.EOLGAE_FIXTURE_OUTDIR;
 // Storybook 처럼 index.html 이 아닌 HTML 을 입력으로 빌드하는 경우를 흉내 낸다(서비스 워커를 빌드하지 않아야 한다).
 const input = process.env.EOLGAE_FIXTURE_INPUT;
+// 서비스 워커 소스를 바꿔 빌드한다(동적 import 케이스).
+const swSrc = process.env.EOLGAE_FIXTURE_SW_SRC;
 
 export default defineConfig({
-  plugins: [eolgae({ ...(outDir ? { outDir } : {}), serviceWorker: {} })],
+  plugins: [eolgae({ ...(outDir ? { outDir } : {}), serviceWorker: swSrc ? { src: swSrc } : {} })],
   ...(input ? { build: { rollupOptions: { input } } } : {}),
   logLevel: 'warn',
 });

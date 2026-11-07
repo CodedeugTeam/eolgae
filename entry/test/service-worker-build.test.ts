@@ -6,7 +6,12 @@ import assert from 'node:assert/strict';
 import { access, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
+import * as vite from 'vite';
+import { chromium } from 'playwright';
 import { buildSwFixture, swFixtureRoot } from './helpers/fixture.ts';
+import { startStaticServer } from './helpers/static-server.ts';
+
+const isRolldown = !!(vite as unknown as Record<string, unknown>).rolldownVersion;
 
 async function walk(dir: string): Promise<string[]> {
   const out: string[] = [];
@@ -58,4 +63,43 @@ test('serviceWorker 빌드: index.html 이 아닌 입력(Storybook 꼴)이면 �
   const all = await readdir(out);
   assert.ok(all.includes('iframe.html'), all.join(','));
   assert.ok(!all.includes('service-worker.js') && !all.includes('service-worker.mjs'), `서비스 워커가 없어야 한다: ${all.join(',')}`);
+});
+
+test('serviceWorker 빌드: 동적 import 도 두 축 모두 한 파일로 인라인(청크·import() 없음), build 목록은 메인 빌드 결과, 브라우저에서 동작', { timeout: 120_000 }, async (t) => {
+  const tmp = await mkdtemp(join(tmpdir(), 'eolgae-sw-dynamic-'));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const out = await buildSwFixture('sw-dyn', join(tmp, 'build'), { EOLGAE_FIXTURE_SW_SRC: 'src/service-worker-dynamic.ts' });
+  const all = (await walk(out)).map((f) => relative(out, f).split(sep).join('/')).sort();
+  const sw = await readFile(join(out, 'service-worker.js'), 'utf8');
+
+  // (가) 청크 파일·.mjs 잔재·import() 가 없고, 동적 import 한 모듈이 service-worker.js 안에 들어 있다.
+  assert.ok(!all.some((f) => /(^|\/)lazy[-.]/.test(f)), `${isRolldown ? 'Vite 8(codeSplitting: false)' : 'Vite 7(inlineDynamicImports)'}: 청크가 없어야 한다: ${all.join(',')}`);
+  assert.ok(!all.some((f) => f.endsWith('.mjs')), all.join(','));
+  assert.doesNotMatch(sw, /\bimport\s*\(/, 'import() 가 남지 않는다');
+  assert.ok(sw.includes('lazy-loaded'), '동적 import 모듈이 인라인된다');
+
+  // (나) build 목록 = 메인 빌드가 낸 _app/immutable 파일 전부(2차 빌드가 따로 낸 파일이 없다). 정확한 목록은 (다)에서 서비스 워커가 돌려준 값으로 본다.
+  const immutable = all.filter((f) => f.startsWith('_app/immutable/')).map((f) => `/${f}`);
+  for (const f of immutable) assert.ok(sw.includes(f), `build 목록에 ${f}`);
+
+  // (다) 브라우저에서 등록되고, 메시지 처리 중 동적 import 한 값을 돌려준다.
+  const server = await startStaticServer(out);
+  t.after(() => server.close());
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(server.url);
+  const info = await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.ready;
+    const channel = new MessageChannel();
+    const reply = new Promise<{ lazyValue: string; version: string; build: string[] }>((ok) => (channel.port1.onmessage = (e) => ok(e.data)));
+    reg.active!.postMessage({ type: 'INFO' }, [channel.port2]);
+    return reply;
+  });
+  assert.equal(info.lazyValue, 'lazy-loaded');
+  assert.equal(info.version, 'sw-dyn');
+  assert.deepEqual([...info.build].sort(), immutable);
+  assert.deepEqual(errors, []);
 });

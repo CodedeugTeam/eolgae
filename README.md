@@ -174,7 +174,7 @@ self.addEventListener('install', (event) => {
 
 타입은 위처럼 소스 맨 위 `/// <reference types="@codedeugteam/eolgae/service-worker" />` 로 가져오거나 tsconfig `types` 에 `"@codedeugteam/eolgae/service-worker"` 를 넣습니다. `$service-worker` 별칭은 제공하지 않으므로 import 줄 하나를 바꿉니다. `$lib` 별칭과 앱 vite.config 의 `resolve.alias`·`define` 은 서비스 워커 빌드에도 들어갑니다. Svelte 등 다른 플러그인은 들어가지 않습니다(SvelteKit 과 같음).
 
-**등록은 앱이 합니다.** 플러그인은 `index.html` 을 고치지 않습니다. SvelteKit 이 넣던 것과 같은 시점(`load` 이벤트)·같은 꼴(`type: 'module'`)로 앱 `index.html` 이나 `src/main.ts` 에 둡니다. 빌드 결과는 import 가 없는 한 파일이지만, 자산 주소를 `import.meta.url` 로 푸는 코드(wasm 등)가 있으면 모듈 워커여야 하고, dev 의 `service-worker.js` 는 소스를 `import` 하므로 모듈 워커로만 돕니다.
+**등록은 앱이 합니다.** 플러그인은 `index.html` 을 고치지 않습니다. SvelteKit 이 넣던 것과 같은 시점(`load` 이벤트)·같은 꼴(`type: 'module'`)로 앱 `index.html` 이나 `src/main.ts` 에 둡니다. 빌드 결과는 import 가 없는 한 파일(아래 세부 참고)이지만, 자산 주소를 `import.meta.url` 로 푸는 코드(wasm 등)가 있으면 모듈 워커여야 하고, dev 의 `service-worker.js` 는 소스를 `import` 하므로 모듈 워커로만 돕니다.
 
 ```ts
 // src/main.ts (또는 index.html 의 <script>)
@@ -188,7 +188,7 @@ if ('serviceWorker' in navigator) {
 동작 세부:
 
 - 앱과 서비스 워커가 함께 쓰는 자산(예: `new URL('./x.wasm', import.meta.url)`)은 두 빌드에서 같은 이름 규칙(`assetsDir`·`assetFileNames`)으로 나와 **한 파일만** 남고, 그 파일이 `build` 목록에 들어 있어 오프라인에서도 캐시로 풀립니다.
-- Vite 8 은 `service-worker.js` 를 바로 내고, Vite 7 은 SvelteKit 과 같게 `.mjs` 로 낸 뒤 이름을 바꿉니다. 결과물은 두 축에서 같은 꼴입니다.
+- 서비스 워커 빌드는 동적 `import()` 까지 한 파일로 인라인하며, 결과물은 두 축에서 같은 꼴입니다(Vite 8 은 `codeSplitting: false` 로 `service-worker.js` 를 바로 내고, Vite 7 은 SvelteKit 과 같게 `inlineDynamicImports` 로 `.mjs` 를 낸 뒤 이름을 바꿉니다). 서비스 워커 안의 `import()` 는 HTML 명세상 금지라 따로 나온 청크는 실행 중 실패합니다. SvelteKit 은 Vite 8 에서 청크를 따로 내 이 경우 서비스 워커가 동작하지 않고, eolgae 는 인라인으로 이를 고칩니다. 이 설정은 서비스 워커 빌드에만 들어가고 앱 빌드에는 닿지 않습니다.
 - 서비스 워커는 `vite build` 의 앱 빌드(입력이 없거나 root `index.html` 하나)에서만 빌드합니다. dev·vitest, SSR·라이브러리 빌드, Storybook(`iframe.html` 입력) 빌드에서는 빌드하지 않습니다.
 - dev 서버는 `/service-worker.js` 요청에 소스를 import 하는 한 줄(`import '/@fs/<절대 경로>/src/service-worker.ts';`)을 돌려주고, 가상 모듈은 `build: []` 를 냅니다. SvelteKit 2 dev 와 같은 동작이라 dev 에서도 등록·설치됩니다.
 - 서비스 워커 안에서 가상 모듈 밖의 앱 전용 모듈(DOM 을 쓰는 코드 등)은 import 하지 않습니다. 가상 모듈을 서비스 워커가 아닌 앱 코드에서 import 하면 에러가 납니다.
