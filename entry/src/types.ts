@@ -50,10 +50,15 @@ export interface GotoOptions {
   state?: unknown;
 }
 
-/** 서비스 워커 매니페스트 옵션(entry-설계 3.6). 1차는 타입만 두고 roomcast 전환 티켓에서 채운다. */
+/**
+ * 서비스 워커 매니페스트 옵션(entry-설계 3.6). 켜면 `vite build` 가 서비스 워커를 함께 빌드하고,
+ * 서비스 워커 코드는 가상 모듈 `virtual:eolgae/service-worker` 에서 `build`·`files`·`version` 을 가져온다.
+ */
 export interface ServiceWorkerOptions {
-  /** 서비스 워커 소스 경로. 기본 `src/service-worker.ts` 예정 */
+  /** 서비스 워커 소스 경로(root 기준). 기본 `src/service-worker.ts`(없으면 `src/service-worker.js`) */
   src?: string;
-  /** 출력 파일명. 기본 `service-worker.js` 예정 */
+  /** 출력 파일명(outDir 바로 아래). 기본 `service-worker.js` */
   fileName?: string;
+  /** `files` 목록에 넣을 정적 파일 필터. publicDir 기준 `/` 구분 상대 경로를 받는다. 기본 `.DS_Store` 제외 */
+  files?: (file: string) => boolean;
 }

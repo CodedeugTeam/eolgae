@@ -131,9 +131,67 @@ export default defineConfig({
 | `publicDir` | `'static'` | `publicDir` (앱들이 `static/` 을 씁니다) |
 | `lib` | `'src/lib'` | `resolve.alias['$lib']`. `false` 면 넣지 않음 |
 | `version` | `process.env.APP_VERSION ?? 'dev'` | `define['import.meta.env.APP_VERSION']` (JSON 문자열) |
-| `serviceWorker` | 없음 | **1차 미구현.** 값을 주면 에러 |
+| `serviceWorker` | 없음(끔) | 서비스 워커 매니페스트. 아래 「서비스 워커」 절 |
 
 표의 값은 기본값입니다. 앱 `vite.config.ts` 가 `build.outDir`·`build.assetsDir`·`publicDir` 를 직접 적었으면 그 값을 존중하고, 플러그인 옵션을 주면 옵션이 이깁니다. 그 외에 항상 `optimizeDeps.exclude: ['@codedeugteam/eolgae']` 를 넣습니다. 결과물은 `build/index.html` + `build/_app/immutable/<hash 자산>` + `static/` 복사본이며, Vite 기본 `dist/`·`assets/` 는 쓰지 않습니다. 모르는 경로를 `index.html` 로 폴백하는 일은 서빙 쪽(Go embed·nginx)이 하므로 `404.html` 을 만들지 않습니다.
+
+### 서비스 워커
+
+SvelteKit 의 `src/service-worker.ts` + `$service-worker` 를 대신합니다. `serviceWorker` 옵션을 주면 `vite build` 가 앱 빌드를 마친 뒤 서비스 워커를 한 번 더 빌드해 outDir 바로 아래 `service-worker.js` 로 냅니다. 서비스 워커 코드는 가상 모듈 `virtual:eolgae/service-worker` 에서 캐시할 목록과 버전을 가져옵니다. 옵션을 주지 않으면 아무 일도 하지 않습니다.
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  plugins: [svelte(), eolgae({ serviceWorker: {} })],
+});
+```
+
+| `serviceWorker` 옵션 | 기본값 | 뜻 |
+|---|---|---|
+| `src` | `'src/service-worker.ts'`(없으면 `.js`) | 서비스 워커 소스(root 기준) |
+| `fileName` | `'service-worker.js'` | 출력 파일 이름(outDir 바로 아래, 폴더 없는 `.js`) |
+| `files` | `.DS_Store` 제외 | `files` 목록 필터. 정적 파일 폴더 기준 `/` 구분 경로를 받아 `true` 면 넣는다 |
+
+가상 모듈이 내보내는 값은 SvelteKit `$service-worker` 의 같은 이름과 뜻이 같습니다(`base`·`prerendered` 는 없습니다).
+
+| 이름 | 빌드 | dev |
+|---|---|---|
+| `build: string[]` | 앱 빌드가 낸 해시 자산(JS·CSS·wasm 등, `/_app/immutable/...`). `index.html`·sourcemap 은 빠집니다 | `[]` |
+| `files: string[]` | 정적 파일 폴더(`static/`)의 파일(`/robots.txt` 등) | 같음 |
+| `version: string` | 플러그인 `version`(기본 `process.env.APP_VERSION ?? 'dev'`) | 같음 |
+
+```ts
+// src/service-worker.ts
+/// <reference types="@codedeugteam/eolgae/service-worker" />
+/// <reference lib="webworker" />
+import { build, files, version } from 'virtual:eolgae/service-worker'; // 옛 코드: from '$service-worker'
+
+const CACHE = `app-shell-${version}`;
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([...build, ...files, '/'])));
+});
+```
+
+타입은 위처럼 소스 맨 위 `/// <reference types="@codedeugteam/eolgae/service-worker" />` 로 가져오거나 tsconfig `types` 에 `"@codedeugteam/eolgae/service-worker"` 를 넣습니다. `$service-worker` 별칭은 제공하지 않으므로 import 줄 하나를 바꿉니다. `$lib` 별칭과 앱 vite.config 의 `resolve.alias`·`define` 은 서비스 워커 빌드에도 들어갑니다. Svelte 등 다른 플러그인은 들어가지 않습니다(SvelteKit 과 같음).
+
+**등록은 앱이 합니다.** 플러그인은 `index.html` 을 고치지 않습니다. SvelteKit 이 넣던 것과 같은 시점(`load` 이벤트)·같은 꼴(`type: 'module'`)로 앱 `index.html` 이나 `src/main.ts` 에 둡니다. 빌드 결과는 import 가 없는 한 파일(아래 세부 참고)이지만, 자산 주소를 `import.meta.url` 로 푸는 코드(wasm 등)가 있으면 모듈 워커여야 하고, dev 의 `service-worker.js` 는 소스를 `import` 하므로 모듈 워커로만 돕니다.
+
+```ts
+// src/main.ts (또는 index.html 의 <script>)
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js', { type: 'module' });
+  });
+}
+```
+
+동작 세부:
+
+- 앱과 서비스 워커가 함께 쓰는 자산(예: `new URL('./x.wasm', import.meta.url)`)은 두 빌드에서 같은 이름 규칙(`assetsDir`·`assetFileNames`)으로 나와 **한 파일만** 남고, 그 파일이 `build` 목록에 들어 있어 오프라인에서도 캐시로 풀립니다.
+- 서비스 워커 빌드는 동적 `import()` 까지 한 파일로 인라인하며, 결과물은 두 축에서 같은 꼴입니다(Vite 8 은 `codeSplitting: false` 로 `service-worker.js` 를 바로 내고, Vite 7 은 SvelteKit 과 같게 `inlineDynamicImports` 로 `.mjs` 를 낸 뒤 이름을 바꿉니다). 서비스 워커 안의 `import()` 는 HTML 명세상 금지라 따로 나온 청크는 실행 중 실패합니다. SvelteKit 은 Vite 8 에서 청크를 따로 내 이 경우 서비스 워커가 동작하지 않고, eolgae 는 인라인으로 이를 고칩니다. 이 설정은 서비스 워커 빌드에만 들어가고 앱 빌드에는 닿지 않습니다.
+- 서비스 워커는 `vite build` 의 앱 빌드(입력이 없거나 root `index.html` 하나)에서만 빌드합니다. dev·vitest, SSR·라이브러리 빌드, Storybook(`iframe.html` 입력) 빌드에서는 빌드하지 않습니다.
+- dev 서버는 `/service-worker.js` 요청에 소스를 import 하는 한 줄(`import '/@fs/<절대 경로>/src/service-worker.ts';`)을 돌려주고, 가상 모듈은 `build: []` 를 냅니다. SvelteKit 2 dev 와 같은 동작이라 dev 에서도 등록·설치됩니다.
+- 서비스 워커 안에서 가상 모듈 밖의 앱 전용 모듈(DOM 을 쓰는 코드 등)은 import 하지 않습니다. 가상 모듈을 서비스 워커가 아닌 앱 코드에서 import 하면 에러가 납니다.
 
 ### 1차 범위와 미구현
 
@@ -141,7 +199,7 @@ export default defineConfig({
 
 | 동작 | 미구현(호출 시 에러) |
 |---|---|
-| `mount`, `{ path, component }`, 링크 가로채기, `goto`, `page.url`·`page.route`, 플러그인(outDir·assetsDir·publicDir·`$lib`·`APP_VERSION`), 스캐폴드 3파일, `:param` 매칭과 `page.params` 채움 | `RouteDefinition.load` 와 `page.data`, `invalidateAll()`, `replaceState()` 와 `page.state`(얕은 라우팅), 지연 로드 `component: () => import(...)`, 플러그인 `serviceWorker`(서비스 워커 매니페스트), 스크롤 복원 |
+| `mount`, `{ path, component }`, 링크 가로채기, `goto`, `page.url`·`page.route`, 플러그인(outDir·assetsDir·publicDir·`$lib`·`APP_VERSION`·`serviceWorker`), 스캐폴드 3파일, `:param` 매칭과 `page.params` 채움 | `RouteDefinition.load` 와 `page.data`, `invalidateAll()`, `replaceState()` 와 `page.state`(얕은 라우팅), 지연 로드 `component: () => import(...)`, 스크롤 복원 |
 
 ### 개발용 fixture
 
@@ -153,6 +211,8 @@ node -e "import('./entry/test/helpers/fixture.ts').then((m) => m.ensureFixtureLi
 npx vite entry/fixtures/app          # dev
 npx vite build entry/fixtures/app    # → entry/fixtures/app/build/
 ```
+
+`entry/fixtures/sw-app/` 은 `serviceWorker` 옵션을 켠 최소 앱입니다(Svelte 없음). 앱과 서비스 워커가 같은 wasm 을 가져오고, 테스트가 빌드 결과(wasm 한 벌·`build`·`files`·`version`)·dev 서버·Chromium(등록·오프라인 새로고침·대기 워커 → `SKIP_WAITING`)을 봅니다. `npx vite build entry/fixtures/sw-app` 으로 직접 빌드할 수 있습니다.
 
 ## harness: 패리티 하니스
 
