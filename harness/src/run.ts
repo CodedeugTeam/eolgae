@@ -6,8 +6,8 @@ import { chromium, type Browser } from 'playwright';
 import { parseTarget, startTarget, type RunningTarget } from './targets.ts';
 import { startProxy, type RunningProxy } from './proxy.ts';
 import { collect, type Collected } from './collect.ts';
-import { networkSignatures, normalizeDom } from './normalize.ts';
-import { compareConsole, compareDom, compareNetwork, compareScreenshots } from './compare.ts';
+import { networkSignatures, normalizeDom, serviceWorkerSignatures } from './normalize.ts';
+import { compareConsole, compareDom, compareNetwork, compareScreenshots, compareServiceWorkerRequests } from './compare.ts';
 import { compareWs, redactWsComparison, WS_DEFAULTS, wsSummary } from './ws.ts';
 import { buildReport, renderMarkdown, scenarioStatus, type Report, type ScenarioReport } from './report.ts';
 import { scenarioSlug, type Scenario, type ScenarioContext } from './scenario.ts';
@@ -199,8 +199,15 @@ async function compareAndWrite(
   await writeFile(newNetPath, JSON.stringify({ requests: newC.network, ws: newC.ws }, null, 2) + '\n');
   const apiOnly = scenario.network?.apiOnly === true;
   const sigOpts = { apiPrefix, apiOnly };
+  const pageNetwork = compareNetwork(networkSignatures(oldC.network, sigOpts), networkSignatures(newC.network, sigOpts));
+  // network.serviceWorker 를 켰을 때만 서비스 워커 요청 집합을 비교해 붙인다. 끄면 기존 보고서와 같은 모양이다.
+  const swNetwork =
+    scenario.network?.serviceWorker === true
+      ? compareServiceWorkerRequests(serviceWorkerSignatures(oldC.network, sigOpts), serviceWorkerSignatures(newC.network, sigOpts))
+      : undefined;
   const network = {
-    ...compareNetwork(networkSignatures(oldC.network, sigOpts), networkSignatures(newC.network, sigOpts)),
+    ...pageNetwork,
+    ...(swNetwork ? { equal: pageNetwork.equal && swNetwork.equal, serviceWorker: swNetwork } : {}),
     files: { old: rel(oldNetPath), new: rel(newNetPath) },
     scope: apiOnly ? ('api' as const) : ('all' as const),
   };

@@ -39,6 +39,13 @@ export interface NetworkOptions {
    * 기본 false: 문서 요청·`/_app/` 자산·favicon 을 뺀 모든 요청을 (method, path+query, status) 순서로 비교한다.
    */
   apiOnly?: boolean;
+  /**
+   * true 면 서비스 워커가 보낸 요청(스크립트 요청, install 의 cache.addAll, fetch 핸들러의 fetch 등)도 수집해
+   * 페이지 요청 순서 비교와 함께 두 대상의 집합(순서 무시, 중복은 개수까지)으로 비교한다. 제외 규칙과 apiOnly 는 같게 적용한다.
+   * 서비스 워커 요청도 run 뒤 진행 중 요청 대기에 들어간다. install 이 끝나기 전에 run 이 끝나지 않게
+   * run 안에서 `navigator.serviceWorker.ready` 등을 기다려 둔다. 기본 false(서비스 워커 요청은 수집하지 않는다)
+   */
+  serviceWorker?: boolean;
 }
 
 export interface Scenario {

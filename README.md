@@ -166,7 +166,7 @@ npx vite build entry/fixtures/app    # → entry/fixtures/app/build/
 |---|---|---|
 | 스크린샷 | `page.screenshot` | pixelmatch. 시나리오별 `threshold`(기본 0.1)·`maxDiffPixelRatio`(기본 0). 크기가 다르면 차이. `screenshots/<scenario>/{old,new,diff}.png` (diff는 차이가 있을 때만) |
 | DOM | `document.documentElement.outerHTML`. 시나리오 `dom.root`(CSS selector)가 있으면 그 요소의 outerHTML 만, `dom.title`이면 `document.title`을 `<title>`로 앞에 붙임 | 정규화 뒤 문자열 비교. 다르면 첫 차이 지점 앞뒤를 보고서에 발췌. 정규화한 전체는 `dom/<scenario>.{old,new}.html` |
-| 네트워크 | `page.on('request'/'response')` | 문서 요청·`/_app/` 자산·favicon을 뺀 **모든 요청**의 `(method, path+query, status)` 순서 비교. 시나리오 `network.apiOnly: true`면 `--api-prefix` 요청만(v0.1.0 동작). 원본은 `network/<scenario>.{old,new}.json` |
+| 네트워크 | `page.on('request'/'response')`. 시나리오 `network.serviceWorker: true`면 서비스 워커가 보낸 요청도 BrowserContext 이벤트로 | 문서 요청·`/_app/` 자산·favicon을 뺀 **모든 요청**의 `(method, path+query, status)` 순서 비교. 시나리오 `network.apiOnly: true`면 `--api-prefix` 요청만(v0.1.0 동작). 서비스 워커 요청은 순서 없는 집합으로 따로 비교([서비스 워커 요청](#서비스-워커-요청) 참조). 원본은 `network/<scenario>.{old,new}.json` |
 | 콘솔 | `console` error 레벨·`pageerror` | 두 대상 모두 0건이어야 같음. 모든 메시지 목록을 보고서에 적음 |
 | WebSocket | `page.on('websocket')` 연결·프레임(sent/received)·종료·오류 | 연결 순서열(path+query·종료 여부)과 프레임 순서열 `(연결 순번, 방향, 메시지 종류[, 페이로드])` 비교. 옵션과 규칙은 아래 [WebSocket 축](#websocket-축) 참조. 원본은 `network/<scenario>.{old,new}.json`의 `ws` |
 
@@ -180,6 +180,33 @@ DOM 정규화 규칙은 빌드마다 바뀌는 값만 지웁니다.
 - 연속 공백 → 한 칸
 
 정규화로 지워지지 않는 서빙 차이도 있습니다. adapter-node 셸은 라우트별 `<link rel="stylesheet">`를, adapter-static 셸은 `modulepreload` 목록을 `<head>`에 넣고, 이름이 해시만인 chunk(`/_app/immutable/chunks/<hash>.js`)는 빌드마다 다릅니다. 이런 앱은 시나리오에 `dom: { root: 'main', title: true }`처럼 범위를 주어 `<head>`와 인라인 부트를 비교 밖에 둡니다.
+
+### 서비스 워커 요청
+
+서비스 워커가 보낸 요청(서비스 워커 스크립트 요청, install의 `cache.addAll`, fetch 핸들러 안의 `fetch` 등)은 `page.on('request')`에 오지 않습니다. 그래서 기본 네트워크 축에는 들어가지 않습니다. 시나리오에 `network: { serviceWorker: true }`를 주면 그 시나리오에서만 BrowserContext 이벤트(`context.on('request'/'response'/'requestfinished'/'requestfailed')`)를 더 듣고, `request.serviceWorker()`가 있는 요청을 서비스 워커 요청으로 모읍니다.
+
+- 출처 표시: 원본 `network/<scenario>.{old,new}.json`의 `requests[].source`가 `page` 또는 `service-worker`입니다. 옵션을 켜지 않으면 이 필드는 없습니다.
+- 비교: 페이지 요청은 지금처럼 순서대로, 서비스 워커 요청은 같은 제외 규칙(문서·`/_app/` 자산·favicon, `apiOnly`)을 적용한 뒤 **순서 없는 집합**으로 비교합니다. `cache.addAll`은 병렬로 나가 순서가 보장되지 않기 때문입니다. 같은 요청이 여러 번이면 개수까지 맞아야 같음입니다. 둘 다 같아야 네트워크 축이 같음이고, 집합이 달라도 종료 코드 1입니다.
+- 대기: 서비스 워커 요청도 `run` 뒤 진행 중 요청 대기(최대 3초)에 들어갑니다. 그때까지 응답이 없으면 페이지 요청과 같게 `no-response`로 비교합니다. 대기는 이미 시작된 요청만 기다리므로, install이 끝나기 전에 `run`이 끝나지 않게 `run` 안에서 `navigator.serviceWorker.ready`를 기다려 둡니다.
+- 보고서: 네트워크 칸에 `✅ 같음 (SW 5/5)`처럼 old/new 서비스 워커 요청 건수가 붙습니다. 다르면 차이 상세에 「네트워크 (서비스 워커 요청 집합)」 절이 생겨 old에만·new에만 있는 요청을 적습니다. 페이지 요청 순서가 같으면 순서 표는 적지 않습니다. `report.json`에는 `scenarios[].network.serviceWorker`(`equal`·정렬한 `old`/`new`·`onlyOld`/`onlyNew`)가 들어갑니다.
+
+```ts
+{
+  name: 'sw-install',
+  async run(page) {
+    await page.goto('/');
+    await page.evaluate('navigator.serviceWorker.ready.then(() => true)'); // install·activate 가 끝날 때까지
+  },
+  network: { serviceWorker: true },
+}
+```
+
+알아 둘 점이 있습니다.
+
+- 하니스는 시나리오마다 새 BrowserContext를 만들므로, 옵션을 켠 시나리오마다 서비스 워커가 새로 설치되고 install 요청 묶음이 매번 잡힙니다.
+- `/_app/` 자산은 이름에 해시가 있어 기본 제외 규칙으로 빠집니다. 남는 비교 대상은 `/`, 서비스 워커 스크립트, `static/` 파일처럼 이름이 고정된 요청입니다. `/_app/` 자산이 빠짐없이 캐시됐는지는 시나리오 안에서 `caches` API로 따로 확인합니다.
+- 서비스 워커가 페이지 요청을 가로채 다시 `fetch`하는 앱은 같은 주소가 페이지 요청과 서비스 워커 요청에 한 번씩 잡힐 수 있습니다.
+- 옵션을 켜지 않은 시나리오는 수집·원본 JSON·보고서·종료 코드가 이 기능을 넣기 전과 같습니다(`harness/test/golden/`의 보고서와 비교하는 회귀 테스트가 있습니다).
 
 ### WebSocket 축
 
@@ -347,7 +374,7 @@ interface Scenario {
   screenshot?: { threshold?: number; maxDiffPixelRatio?: number; fullPage?: boolean } | false;
   headers?: Record<string, string>;
   dom?: { root?: string; title?: boolean };            // root: 이 selector 의 첫 요소만 비교(없으면 실행 오류). title: document.title 도 비교
-  network?: { apiOnly?: boolean };                     // true 면 --api-prefix 요청만(v0.1.0 동작)
+  network?: { apiOnly?: boolean; serviceWorker?: boolean }; // apiOnly: --api-prefix 요청만(v0.1.0 동작). serviceWorker: 서비스 워커 요청도 집합 비교
   websocket?: { ignoreQuery?: boolean; messageKey?: string; ignorePayload?: boolean; timeoutMs?: number };
 }
 function defineScenarios(list: Scenario[]): Scenario[]
@@ -355,7 +382,7 @@ function defineScenarios(list: Scenario[]): Scenario[]
 
 `dom.root`에 맞는 요소가 없으면 빈 문자열로 비교하지 않고 그 시나리오를 실행 오류(종료 2)로 보고합니다.
 
-`run`이 끝난 뒤 진행 중인 요청이 끝나길 최대 3초 기다리고, 열린 WebSocket이 있으면 `websocket.timeoutMs`(기본 1초)만큼 더 기다린 다음 수집합니다. 비동기 렌더가 있으면 `run` 안에서 `waitForSelector` 등으로 상태를 고정해 두는 편이 안전합니다.
+`run`이 끝난 뒤 진행 중인 요청(`network.serviceWorker`를 켰으면 서비스 워커 요청 포함)이 끝나길 최대 3초 기다리고, 열린 WebSocket이 있으면 `websocket.timeoutMs`(기본 1초)만큼 더 기다린 다음 수집합니다. 비동기 렌더가 있으면 `run` 안에서 `waitForSelector` 등으로 상태를 고정해 두는 편이 안전합니다.
 
 ## 개발
 
@@ -377,7 +404,7 @@ CI(`.github/workflows/ci.yml`)는 PR·main push마다 ubuntu 러너에서 `test 
 구성은 두 묶음입니다.
 
 - entry: `entry/src/`(소스, `.ts`·`.svelte.ts`만), `entry/test/`(node:test. 라우터·링크 규칙·플러그인 단위 테스트와 fixture 빌드·dev·하니스 스모크), `entry/fixtures/app/`(fixture 앱), `template/`(스캐폴드). 빌드는 `tsconfig.entry.json` → `dist/entry/`
-- harness: `harness/src/`(소스), `harness/test/`(테스트), `harness/fixtures/`(테스트용 최소 SPA와 시나리오). 빌드는 `tsconfig.json` → `dist/`
+- harness: `harness/src/`(소스), `harness/test/`(테스트, `golden/`은 옵션을 켜지 않은 실행의 회귀 비교용 보고서), `harness/fixtures/`(테스트용 최소 SPA·서비스 워커 SPA와 시나리오). 빌드는 `tsconfig.json` → `dist/`
 
 ## 라이선스
 

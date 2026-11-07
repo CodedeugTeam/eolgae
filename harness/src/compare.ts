@@ -124,6 +124,22 @@ export interface NetworkComparison {
   new: NetworkSignature[];
   /** 처음 어긋난 위치. 한쪽이 더 길면 짧은 쪽 길이 */
   firstDiffIndex?: number;
+  /**
+   * 시나리오 network.serviceWorker 를 켰을 때만 붙는 서비스 워커 요청 집합 비교.
+   * 이때 equal 은 페이지 요청 순서와 이 집합이 모두 같아야 true 다(firstDiffIndex 는 페이지 요청 순서에만 쓴다).
+   */
+  serviceWorker?: ServiceWorkerComparison;
+}
+
+export interface ServiceWorkerComparison {
+  equal: boolean;
+  /** 정렬된 서비스 워커 요청 요약 */
+  old: NetworkSignature[];
+  new: NetworkSignature[];
+  /** old 에만 있는 요청(formatSignature 꼴). 같은 요청이 여러 번이면 남는 개수만큼 들어간다 */
+  onlyOld: string[];
+  /** new 에만 있는 요청 */
+  onlyNew: string[];
 }
 
 export function compareNetwork(oldSigs: NetworkSignature[], newSigs: NetworkSignature[]): NetworkComparison {
@@ -136,6 +152,32 @@ export function compareNetwork(oldSigs: NetworkSignature[], newSigs: NetworkSign
     }
   }
   return { equal: true, old: oldSigs, new: newSigs };
+}
+
+/** 서비스 워커 요청을 순서 없이(중복은 개수까지) 비교한다. 입력은 serviceWorkerSignatures 결과다. */
+export function compareServiceWorkerRequests(oldSigs: NetworkSignature[], newSigs: NetworkSignature[]): ServiceWorkerComparison {
+  const remaining = new Map<string, number>();
+  for (const s of newSigs) {
+    const k = formatSignature(s);
+    remaining.set(k, (remaining.get(k) ?? 0) + 1);
+  }
+  const onlyOld: string[] = [];
+  for (const s of oldSigs) {
+    const k = formatSignature(s);
+    const n = remaining.get(k) ?? 0;
+    if (n > 0) remaining.set(k, n - 1);
+    else onlyOld.push(k);
+  }
+  const onlyNew: string[] = [];
+  for (const s of newSigs) {
+    const k = formatSignature(s);
+    const n = remaining.get(k) ?? 0;
+    if (n > 0) {
+      onlyNew.push(k);
+      remaining.set(k, n - 1);
+    }
+  }
+  return { equal: onlyOld.length === 0 && onlyNew.length === 0, old: oldSigs, new: newSigs, onlyOld: onlyOld.sort(), onlyNew: onlyNew.sort() };
 }
 
 export interface ConsoleMessage {
