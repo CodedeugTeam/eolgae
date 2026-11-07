@@ -1,5 +1,9 @@
 # eolgae
 
+[![ci](https://github.com/CodedeugTeam/eolgae/actions/workflows/ci.yml/badge.svg)](https://github.com/CodedeugTeam/eolgae/actions/workflows/ci.yml)
+
+지원 축: Vite 8 / vite-plugin-svelte 7(개발 기준)과 Vite 7 / vite-plugin-svelte 6(소비 앱 4개). CI가 PR·main push마다 두 축에서 빌드·테스트를 돌립니다.
+
 SvelteKit 앱을 Vite + Svelte 5 정적 SPA로 옮길 때 쓰는 두 묶음을 한 패키지 `@codedeugteam/eolgae`로 제공합니다.
 
 | 묶음 | import 경로 | 하는 일 |
@@ -360,6 +364,15 @@ npm ci
 npm run build      # tsc → dist/
 npm test           # node:test (harness: 정규화·비교·보고서·정적 서버·프록시·자기 대조 e2e / entry: 라우터·링크 규칙·플러그인·fixture 빌드·dev·스모크)
 ```
+
+Vite 7 / vite-plugin-svelte 6 축(소비 앱이 쓰는 조합)으로도 같은 테스트를 돌립니다. 설치된 `vite`·플러그인만 바꾸고(`--no-save`) `package.json`·lock은 그대로입니다. 끝나면 `npm ci`로 되돌립니다.
+
+```sh
+npm run test:vite7   # vite@7.3.1 + @sveltejs/vite-plugin-svelte@6.2.4 로 교체 → build → test
+npm ci               # 기본 축(Vite 8)으로 복원
+```
+
+CI(`.github/workflows/ci.yml`)는 PR·main push마다 ubuntu 러너에서 `test (vite8)`·`test (vite7)` 두 job으로 같은 순서(npm ci → 교체 → playwright chromium 설치 → build → test)를 돌립니다.
 
 구성은 두 묶음입니다.
 

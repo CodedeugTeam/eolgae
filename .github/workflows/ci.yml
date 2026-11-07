@@ -1,0 +1,73 @@
+# eolgae CI: PR·main push마다 두 축(Vite 8/plugin 7, Vite 7/plugin 6)에서 빌드·테스트.
+# - vite8: package-lock 그대로(개발 기준 vite 8.3.6 · @sveltejs/vite-plugin-svelte 7.3.1)
+# - vite7: npm ci 뒤 설치 단계에서만 vite 7.3.1 · plugin 6.2.4로 교체(--no-save, lock·package.json 변경 없음)
+#   소비 앱 4개(termcast·snsgate·ai-influencer·gk-dash)가 쓰는 축이다.
+# 러너는 ubuntu만 쓴다. 로컬 재현은 README 「개발」 절의 `npm run test:vite7`.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.axis }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - axis: vite8
+            vite: ''
+            plugin: ''
+          - axis: vite7
+            vite: 7.3.1
+            plugin: 6.2.4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # lock 그대로 설치. prepare 스크립트(tsc)가 함께 돈다.
+      - run: npm ci
+
+      # vite7 축: 설치된 vite·플러그인만 바꾼다. lock·package.json은 건드리지 않는다.
+      - name: Vite 7 / vite-plugin-svelte 6으로 교체
+        if: matrix.vite != ''
+        run: npm install --no-save "vite@${{ matrix.vite }}" "@sveltejs/vite-plugin-svelte@${{ matrix.plugin }}"
+
+      # 실제로 설치된 버전이 축과 맞는지 확인한다(교체가 조용히 실패하면 여기서 끊는다).
+      - name: 설치 버전 확인
+        env:
+          EXPECT_VITE: ${{ matrix.vite }}
+          EXPECT_PLUGIN: ${{ matrix.plugin }}
+        run: |
+          node -e '
+            const read = (p) => JSON.parse(require("fs").readFileSync(p, "utf8")).version;
+            const vite = read("node_modules/vite/package.json");
+            const plugin = read("node_modules/@sveltejs/vite-plugin-svelte/package.json");
+            console.log(`vite ${vite}, @sveltejs/vite-plugin-svelte ${plugin}`);
+            const { EXPECT_VITE, EXPECT_PLUGIN } = process.env;
+            if (EXPECT_VITE && vite !== EXPECT_VITE) throw new Error(`vite 버전 불일치: ${vite} != ${EXPECT_VITE}`);
+            if (EXPECT_PLUGIN && plugin !== EXPECT_PLUGIN) throw new Error(`plugin 버전 불일치: ${plugin} != ${EXPECT_PLUGIN}`);
+            if (!EXPECT_VITE && !vite.startsWith("8.")) throw new Error(`vite8 축인데 vite ${vite}`);
+          '
+
+      # e2e·dev·build fixture 테스트가 chromium을 쓴다.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run build
+      - run: npm test
+
+      # lock·package.json이 바뀌었으면(교체가 저장됐으면) 실패시킨다.
+      - name: lock·package.json 변경 없음 확인
+        run: git diff --exit-code -- package.json package-lock.json
