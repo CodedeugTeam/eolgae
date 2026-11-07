@@ -1,0 +1,6 @@
+node_modules/
+dist/
+harness-out/
+harness/fixtures/spa-changed/
+*.log
+.DS_Store
