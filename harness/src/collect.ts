@@ -1,5 +1,5 @@
 // 한 대상에서 시나리오 하나를 돌리고 네 축 원본(스크린샷·DOM·네트워크·콘솔)과 WebSocket 이벤트를 모은다.
-import type { Browser, Page, Request as PwRequest } from 'playwright';
+import type { Browser, Page, Request as PwRequest, Response as PwResponse } from 'playwright';
 import type { DomOptions, Scenario, ScenarioContext } from './scenario.ts';
 import type { NetworkEntry } from './normalize.ts';
 import type { ConsoleMessage } from './compare.ts';
@@ -46,28 +46,54 @@ export async function collect(browser: Browser, scenario: Scenario, ctx: Scenari
     const consoleMsgs: ConsoleMessage[] = [];
     const ws = attachWsCollector(page, startedAt);
 
-    page.on('request', (req) => {
+    // network.serviceWorker 를 켜면 서비스 워커가 보낸 요청도 모은다. 이 요청은 page 이벤트에 오지 않고
+    // BrowserContext 이벤트에서 request.serviceWorker() 가 있는 요청으로만 보인다. 옵션을 켜지 않으면 기존과 같게
+    // page 이벤트만 듣고 source 필드도 남기지 않는다.
+    const withServiceWorker = scenario.network?.serviceWorker === true;
+    const track = (req: PwRequest, source: NetworkEntry['source']) => {
       const entry: NetworkEntry = {
         seq: network.length,
         method: req.method(),
         url: req.url(),
         resourceType: req.resourceType(),
         t: Date.now() - startedAt,
+        ...(source ? { source } : {}),
       };
       network.push(entry);
       bySeq.set(req, entry);
       pending.add(req);
-    });
-    page.on('response', (res) => {
+    };
+    const onResponse = (res: PwResponse) => {
       const entry = bySeq.get(res.request());
       if (entry) entry.status = res.status();
-    });
-    page.on('requestfinished', (req) => pending.delete(req));
-    page.on('requestfailed', (req) => {
+    };
+    const onFinished = (req: PwRequest) => pending.delete(req);
+    const onFailed = (req: PwRequest) => {
       const entry = bySeq.get(req);
       if (entry) entry.failure = req.failure()?.errorText ?? 'failed';
       pending.delete(req);
-    });
+    };
+
+    page.on('request', (req) => track(req, withServiceWorker ? 'page' : undefined));
+    page.on('response', onResponse);
+    page.on('requestfinished', onFinished);
+    page.on('requestfailed', onFailed);
+    if (withServiceWorker) {
+      // context 이벤트는 페이지 요청에도 오므로 서비스 워커 요청만 골라 페이지 요청이 두 번 잡히지 않게 한다.
+      const fromWorker = (req: PwRequest) => req.serviceWorker() !== null;
+      context.on('request', (req) => {
+        if (fromWorker(req)) track(req, 'service-worker');
+      });
+      context.on('response', (res) => {
+        if (fromWorker(res.request())) onResponse(res);
+      });
+      context.on('requestfinished', (req) => {
+        if (fromWorker(req)) onFinished(req);
+      });
+      context.on('requestfailed', (req) => {
+        if (fromWorker(req)) onFailed(req);
+      });
+    }
     page.on('console', (msg) => {
       const loc = msg.location();
       consoleMsgs.push({

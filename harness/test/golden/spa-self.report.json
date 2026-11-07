@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "createdAt": "<createdAt>",
+  "targets": {
+    "old": "static:<new>",
+    "new": "static:<new>",
+    "backend": "<backend>",
+    "apiPrefix": "/api",
+    "viewport": "1280x720",
+    "headers": [
+      "x-forwarded-user=***",
+      "authorization=***"
+    ],
+    "scenarioFiles": [
+      "harness/fixtures/spa.spec.ts"
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "home",
+      "slug": "home",
+      "status": "same",
+      "durationMs": {
+        "old": 0,
+        "new": 0
+      },
+      "screenshot": {
+        "equal": true,
+        "threshold": 0.1,
+        "maxDiffPixelRatio": 0,
+        "diffPixels": 0,
+        "diffRatio": 0,
+        "old": {
+          "width": 1280,
+          "height": 720
+        },
+        "new": {
+          "width": 1280,
+          "height": 720
+        },
+        "sizeMismatch": false,
+        "skipped": false,
+        "files": {
+          "old": "screenshots/home/old.png",
+          "new": "screenshots/home/new.png"
+        }
+      },
+      "dom": {
+        "equal": true,
+        "oldLength": 609,
+        "newLength": 609,
+        "files": {
+          "old": "dom/home.old.html",
+          "new": "dom/home.new.html"
+        }
+      },
+      "network": {
+        "equal": true,
+        "old": [
+          {
+            "method": "GET",
+            "path": "/api/hello?from=%2F",
+            "status": 200
+          }
+        ],
+        "new": [
+          {
+            "method": "GET",
+            "path": "/api/hello?from=%2F",
+            "status": 200
+          }
+        ],
+        "files": {
+          "old": "network/home.old.json",
+          "new": "network/home.new.json"
+        },
+        "scope": "all"
+      },
+      "console": {
+        "equal": true,
+        "oldErrors": 0,
+        "newErrors": 0,
+        "old": [],
+        "new": []
+      },
+      "ws": {
+        "equal": true,
+        "old": {
+          "connections": [],
+          "frames": [],
+          "openCount": 0,
+          "closeCount": 0,
+          "errorCount": 0
+        },
+        "new": {
+          "connections": [],
+          "frames": [],
+          "openCount": 0,
+          "closeCount": 0,
+          "errorCount": 0
+        },
+        "compared": true,
+        "options": {
+          "ignoreQuery": false,
+          "messageKey": "type",
+          "ignorePayload": false,
+          "timeoutMs": 1000
+        },
+        "files": {
+          "old": "network/home.old.json",
+          "new": "network/home.new.json"
+        }
+      }
+    },
+    {
+      "name": "deep-link",
+      "slug": "deep-link",
+      "status": "same",
+      "durationMs": {
+        "old": 0,
+        "new": 0
+      },
+      "screenshot": {
+        "equal": true,
+        "threshold": 0.1,
+        "maxDiffPixelRatio": 0,
+        "diffPixels": 0,
+        "diffRatio": 0,
+        "old": {
+          "width": 1280,
+          "height": 720
+        },
+        "new": {
+          "width": 1280,
+          "height": 720
+        },
+        "sizeMismatch": false,
+        "skipped": false,
+        "files": {
+          "old": "screenshots/deep-link/old.png",
+          "new": "screenshots/deep-link/new.png"
+        }
+      },
+      "dom": {
+        "equal": true,
+        "oldLength": 623,
+        "newLength": 623,
+        "files": {
+          "old": "dom/deep-link.old.html",
+          "new": "dom/deep-link.new.html"
+        }
+      },
+      "network": {
+        "equal": true,
+        "old": [
+          {
+            "method": "GET",
+            "path": "/api/hello?from=%2Fsome%2Fdeep%2Fpath",
+            "status": 200
+          }
+        ],
+        "new": [
+          {
+            "method": "GET",
+            "path": "/api/hello?from=%2Fsome%2Fdeep%2Fpath",
+            "status": 200
+          }
+        ],
+        "files": {
+          "old": "network/deep-link.old.json",
+          "new": "network/deep-link.new.json"
+        },
+        "scope": "all"
+      },
+      "console": {
+        "equal": true,
+        "oldErrors": 0,
+        "newErrors": 0,
+        "old": [],
+        "new": []
+      },
+      "ws": {
+        "equal": true,
+        "old": {
+          "connections": [],
+          "frames": [],
+          "openCount": 0,
+          "closeCount": 0,
+          "errorCount": 0
+        },
+        "new": {
+          "connections": [],
+          "frames": [],
+          "openCount": 0,
+          "closeCount": 0,
+          "errorCount": 0
+        },
+        "compared": true,
+        "options": {
+          "ignoreQuery": false,
+          "messageKey": "type",
+          "ignorePayload": false,
+          "timeoutMs": 1000
+        },
+        "files": {
+          "old": "network/deep-link.old.json",
+          "new": "network/deep-link.new.json"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "same": 2,
+    "different": 0,
+    "error": 0,
+    "axes": {
+      "screenshot": 0,
+      "dom": 0,
+      "network": 0,
+      "console": 0,
+      "websocket": 0
+    }
+  },
+  "exitCode": 0
+}

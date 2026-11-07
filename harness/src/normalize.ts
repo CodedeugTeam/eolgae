@@ -48,6 +48,11 @@ export interface NetworkEntry {
   failure?: string;
   /** 시나리오 시작 기준 경과 시간(ms) */
   t: number;
+  /**
+   * 요청을 보낸 곳. 시나리오 network.serviceWorker 를 켰을 때만 채워진다('page' 또는 'service-worker').
+   * 없으면 페이지 요청이다(옵션을 켜지 않은 수집은 기존과 같게 이 필드를 남기지 않는다).
+   */
+  source?: 'page' | 'service-worker';
 }
 
 /** 비교에 쓰는 요약: (method, path+query, status) */
@@ -65,14 +70,33 @@ export interface NetworkSignatureOptions {
 }
 
 /**
- * 요청을 (method, path+query, status) 로 순서대로 요약한다. 문서 요청·`/_app/` 자산·favicon 은 항상 빼고,
+ * 페이지 요청을 (method, path+query, status) 로 순서대로 요약한다. 문서 요청·`/_app/` 자산·favicon 은 항상 빼고,
  * apiOnly 면 apiPrefix 요청만 남긴다. 호스트(프록시 포트)는 대상마다 다르므로 path+query 만 본다.
+ * 서비스 워커가 보낸 요청(source 'service-worker')은 serviceWorkerSignatures 가 따로 다룬다.
  */
 export function networkSignatures(entries: readonly NetworkEntry[], opts: NetworkSignatureOptions = {}): NetworkSignature[] {
+  return summarize(
+    [...entries].filter((e) => e.source !== 'service-worker').sort((a, b) => a.seq - b.seq),
+    opts,
+  );
+}
+
+/**
+ * 서비스 워커가 보낸 요청을 networkSignatures 와 같은 제외 규칙으로 요약한 뒤 정렬한다.
+ * install 의 cache.addAll 처럼 병렬로 나가는 요청은 순서가 보장되지 않으므로 순서 없는 집합(중복은 개수까지)으로 비교한다.
+ */
+export function serviceWorkerSignatures(entries: readonly NetworkEntry[], opts: NetworkSignatureOptions = {}): NetworkSignature[] {
+  return summarize(
+    entries.filter((e) => e.source === 'service-worker'),
+    opts,
+  ).sort((a, b) => compareText(formatSignature(a), formatSignature(b)));
+}
+
+function summarize(entries: readonly NetworkEntry[], opts: NetworkSignatureOptions): NetworkSignature[] {
   const apiPrefix = opts.apiPrefix ?? '/api';
   const prefix = apiPrefix.endsWith('/') ? apiPrefix.slice(0, -1) : apiPrefix;
   const out: NetworkSignature[] = [];
-  for (const e of [...entries].sort((a, b) => a.seq - b.seq)) {
+  for (const e of entries) {
     let u: URL;
     try {
       u = new URL(e.url);
@@ -91,6 +115,10 @@ export function networkSignatures(entries: readonly NetworkEntry[], opts: Networ
     out.push({ method: e.method.toUpperCase(), path, status: e.status ?? null });
   }
   return out;
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** v0.1.0 호환. `networkSignatures(entries, { apiPrefix, apiOnly: true })` 와 같다. */

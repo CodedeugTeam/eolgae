@@ -1,5 +1,5 @@
 // 보고서. report.json(구조화)과 report.md(사람용)를 만든다.
-import type { ConsoleComparison, DomComparison, NetworkComparison, ScreenshotComparison } from './compare.ts';
+import type { ConsoleComparison, DomComparison, NetworkComparison, ScreenshotComparison, ServiceWorkerComparison } from './compare.ts';
 import { formatSignature } from './normalize.ts';
 import { formatWsConnection, formatWsFrameDigest, type WsReportComparison } from './ws.ts';
 
@@ -154,7 +154,10 @@ export function renderMarkdown(report: Report): string {
     }
     const shot = !s.screenshot ? NA : s.screenshot.skipped ? SKIP : s.screenshot.equal ? OK : NG;
     const dom = !s.dom ? NA : s.dom.equal ? OK : NG;
-    const net = !s.network ? NA : s.network.equal ? OK : NG;
+    const netMark = !s.network ? NA : s.network.equal ? OK : NG;
+    // 서비스 워커 요청을 비교한 시나리오만 건수를 덧붙인다(옵션을 켜지 않으면 기존 칸 그대로).
+    const sw = s.network?.serviceWorker;
+    const net = sw ? `${netMark} (SW ${sw.old.length}/${sw.new.length})` : netMark;
     const con = !s.console ? NA : s.console.equal ? OK : `${NG} (old ${s.console.oldErrors} / new ${s.console.newErrors})`;
     const ws = !s.ws ? NA : `${s.ws.equal ? OK : NG} (${wsCounts(s.ws)})`;
     lines.push(`| ${esc(s.name)} | ${shot} | ${dom} | ${net} | ${con} | ${ws} |`);
@@ -215,7 +218,8 @@ export function renderMarkdown(report: Report): string {
         lines.push(`- 전체: \`${s.dom.files.old}\`, \`${s.dom.files.new}\``);
         lines.push('');
       }
-      if (s.network && !s.network.equal) {
+      // 서비스 워커 비교가 붙은 시나리오는 페이지 요청 순서가 어긋났을 때만 순서 표를 적는다(집합 차이는 아래 절).
+      if (s.network && !s.network.equal && (!s.network.serviceWorker || s.network.firstDiffIndex !== undefined)) {
         lines.push('#### 네트워크 (요청 순서)');
         lines.push('');
         lines.push(`- 범위: ${s.network.scope === 'all' ? '문서·/_app/ 자산·favicon 을 뺀 전체 요청' : `\`${report.targets.apiPrefix}\` 요청만`}`);
@@ -235,6 +239,9 @@ export function renderMarkdown(report: Report): string {
         lines.push('');
         lines.push(`- 원본: \`${s.network.files.old}\`, \`${s.network.files.new}\``);
         lines.push('');
+      }
+      if (s.network?.serviceWorker && !s.network.serviceWorker.equal) {
+        lines.push(...renderServiceWorkerDetail(s.network.serviceWorker, s.network.files));
       }
       if (s.console && !s.console.equal) {
         lines.push('#### 콘솔');
@@ -265,6 +272,21 @@ export function renderMarkdown(report: Report): string {
     lines.push('');
   }
   return lines.join('\n');
+}
+
+/** 차이 상세의 서비스 워커 절. 순서는 보지 않으므로 한쪽에만 있는 요청 목록을 적는다. */
+function renderServiceWorkerDetail(sw: ServiceWorkerComparison, files: { old: string; new: string }): string[] {
+  const lines: string[] = [];
+  lines.push('#### 네트워크 (서비스 워커 요청 집합)');
+  lines.push('');
+  lines.push(`- 서비스 워커가 보낸 요청: old ${sw.old.length}건, new ${sw.new.length}건 (순서 무시, 같은 요청은 개수까지 비교)`);
+  for (const [label, list] of [['old 에만', sw.onlyOld], ['new 에만', sw.onlyNew]] as const) {
+    lines.push(`- ${label}: ${list.length === 0 ? '없음' : list.map((x) => `\`${esc(x)}\``).join(', ')}`);
+  }
+  lines.push('');
+  lines.push(`- 원본: \`${files.old}\`, \`${files.new}\` (requests[].source 가 'service-worker' 인 항목)`);
+  lines.push('');
+  return lines;
 }
 
 function esc(s: string): string {
