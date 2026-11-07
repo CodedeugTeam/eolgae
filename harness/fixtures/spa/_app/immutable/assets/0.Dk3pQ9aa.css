@@ -1,0 +1,4 @@
+html, body { margin: 0; font-family: sans-serif; background: #fff; color: #111; }
+.shell { padding: 24px; }
+.title { font-size: 32px; margin: 0 0 12px; }
+.hello { font-size: 18px; }

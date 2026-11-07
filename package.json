@@ -1,0 +1,42 @@
+{
+  "name": "@codedeugteam/eolgae",
+  "version": "0.1.0",
+  "description": "SvelteKit 앱을 정적 SPA로 옮길 때 옛 빌드와 새 빌드가 같은지 네 축(스크린샷·DOM·네트워크·콘솔)으로 비교하는 패리티 하니스",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    "./harness": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "eolgae-harness": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "harness/src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "tsc -p tsconfig.json",
+    "test": "node --test \"harness/test/**/*.test.ts\"",
+    "fixtures:changed": "node harness/fixtures/make-changed.ts"
+  },
+  "dependencies": {
+    "pixelmatch": "^8.0.0",
+    "playwright": "^1.65.0",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pngjs": "^6.0.5",
+    "typescript": "^7.0.2"
+  }
+}
