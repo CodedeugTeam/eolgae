@@ -6,3 +6,4 @@ harness/fixtures/spa-changed/
 .DS_Store
 entry/fixtures/app/node_modules/
 entry/fixtures/app/build/
+entry/fixtures/sw-app/build/

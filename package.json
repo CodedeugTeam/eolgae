@@ -18,6 +18,9 @@
       "types": "./dist/entry/plugin.d.ts",
       "default": "./dist/entry/plugin.js"
     },
+    "./service-worker": {
+      "types": "./entry/src/virtual-service-worker.d.ts"
+    },
     "./harness": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

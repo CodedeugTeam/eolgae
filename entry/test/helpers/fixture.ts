@@ -1,5 +1,5 @@
 // entry fixture 앱을 빌드·기동하는 공용 helper. 세 테스트(build·harness·dev)가 같이 쓴다.
-import { access, mkdir, rm, symlink, readlink } from 'node:fs/promises';
+import { access, mkdir, rm, symlink, readlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ export const repoRoot = join(here, '..', '..', '..');
 export const fixtureRoot = join(repoRoot, 'entry', 'fixtures', 'app');
 export const fixtureBuildDir = join(fixtureRoot, 'build');
 export const fixtureSpec = join(repoRoot, 'entry', 'fixtures', 'app.spec.ts');
+export const swFixtureRoot = join(repoRoot, 'entry', 'fixtures', 'sw-app');
 
 async function exists(path: string): Promise<boolean> {
   return access(path).then(
@@ -64,5 +65,16 @@ export async function buildFixture(version = 'fixture-test', outDir = fixtureBui
   const env: NodeJS.ProcessEnv = { APP_VERSION: version };
   if (outDir !== fixtureBuildDir) env.EOLGAE_FIXTURE_OUTDIR = outDir;
   await runNode([join(repoRoot, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', fixtureRoot], repoRoot, env);
+  return outDir;
+}
+
+/**
+ * 서비스 워커 fixture(`entry/fixtures/sw-app`)를 `vite build` 한다. 테스트마다 `outDir` 을 따로 준다.
+ * `static/.DS_Store` 는 git 이 무시하는 이름이라 저장소에 둘 수 없어, 기본 필터가 빼는지 보려고 여기서 만든다.
+ */
+export async function buildSwFixture(version: string, outDir: string, env: NodeJS.ProcessEnv = {}): Promise<string> {
+  await writeFile(join(swFixtureRoot, 'static', '.DS_Store'), 'fixture\n');
+  await rm(outDir, { recursive: true, force: true });
+  await runNode([join(repoRoot, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', swFixtureRoot], repoRoot, { APP_VERSION: version, EOLGAE_FIXTURE_OUTDIR: outDir, ...env });
   return outDir;
 }

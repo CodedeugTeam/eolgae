@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import type { UserConfig } from 'vite';
 import { eolgae, PACKAGE_NAME } from '../src/plugin.ts';
-import { NotImplementedError } from '../src/errors.ts';
 
 function configOf(plugin: ReturnType<typeof eolgae>, user: UserConfig = {}): UserConfig {
   const hook = plugin.config;
@@ -56,7 +55,14 @@ describe('eolgae()', () => {
     const overridden = configOf(eolgae({ outDir: 'build2' }), { build: { outDir: 'out' } });
     assert.equal(overridden.build?.outDir, 'build2');
   });
-  test('serviceWorker 옵션은 1차 미구현 에러', () => {
-    assert.throws(() => eolgae({ serviceWorker: {} }), NotImplementedError);
+  test('serviceWorker 옵션을 주면 같은 플러그인 하나에 서비스 워커 훅이 붙고, config() 결과는 그대로다', () => {
+    const plain = eolgae({ version: 'x' });
+    const withSw = eolgae({ version: 'x', serviceWorker: {} });
+    assert.equal(withSw.name, 'eolgae');
+    assert.deepEqual(configOf(withSw, { root: '/srv/app' }), configOf(plain, { root: '/srv/app' }));
+    for (const hook of ['configResolved', 'resolveId', 'load', 'configureServer', 'generateBundle', 'writeBundle'] as const) {
+      assert.ok(withSw[hook], `${hook} 훅`);
+      assert.equal(plain[hook], undefined, `옵션이 없으면 ${hook} 훅이 없다(v0.2.0 과 같은 동작)`);
+    }
   });
 });
