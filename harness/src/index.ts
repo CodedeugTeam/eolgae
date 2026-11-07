@@ -5,3 +5,4 @@ export type { WsEvent, WsEventKind } from './ws.ts';
 export type { Report, ScenarioReport } from './report.ts';
 export { run, HarnessError } from './run.ts';
 export type { RunOptions, RunResult } from './run.ts';
+export type { WebSocketOptions } from './scenario.ts';

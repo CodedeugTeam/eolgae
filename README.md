@@ -15,7 +15,7 @@ SvelteKit 앱을 정적 SPA로 옮길 때, **옛 빌드와 새 빌드가 같은 
 | DOM | `document.documentElement.outerHTML`. 시나리오 `dom.root`(CSS selector)가 있으면 그 요소의 outerHTML 만, `dom.title`이면 `document.title`을 `<title>`로 앞에 붙임 | 정규화 뒤 문자열 비교. 다르면 첫 차이 지점 앞뒤를 보고서에 발췌. 정규화한 전체는 `dom/<scenario>.{old,new}.html` |
 | 네트워크 | `page.on('request'/'response')` | 문서 요청·`/_app/` 자산·favicon을 뺀 **모든 요청**의 `(method, path+query, status)` 순서 비교. 시나리오 `network.apiOnly: true`면 `--api-prefix` 요청만(v0.1.0 동작). 원본은 `network/<scenario>.{old,new}.json` |
 | 콘솔 | `console` error 레벨·`pageerror` | 두 대상 모두 0건이어야 같음. 모든 메시지 목록을 보고서에 적음 |
-| WebSocket | `page.on('websocket')` 프레임 | **비교하지 않음**(수집 건수만 보고). 비교는 termcast 전환 때 채움 |
+| WebSocket | `page.on('websocket')` 연결·프레임(sent/received)·종료·오류 | 연결 순서열(path+query·종료 여부)과 프레임 순서열 `(연결 순번, 방향, 메시지 종류[, 페이로드])` 비교. 옵션과 규칙은 아래 [WebSocket 축](#websocket-축) 참조. 원본은 `network/<scenario>.{old,new}.json`의 `ws` |
 
 DOM 정규화 규칙은 빌드마다 바뀌는 값만 지웁니다.
 
@@ -27,6 +27,42 @@ DOM 정규화 규칙은 빌드마다 바뀌는 값만 지웁니다.
 - 연속 공백 → 한 칸
 
 정규화로 지워지지 않는 서빙 차이도 있습니다. adapter-node 셸은 라우트별 `<link rel="stylesheet">`를, adapter-static 셸은 `modulepreload` 목록을 `<head>`에 넣고, 이름이 해시만인 chunk(`/_app/immutable/chunks/<hash>.js`)는 빌드마다 다릅니다. 이런 앱은 시나리오에 `dom: { root: 'main', title: true }`처럼 범위를 주어 `<head>`와 인라인 부트를 비교 밖에 둡니다.
+
+### WebSocket 축
+
+`run`이 끝날 때까지 페이지가 연 WebSocket을 모두 수집해 두 대상에서 비교합니다. 프록시 포트가 대상마다 다르므로 연결 URL은 호스트·포트를 빼고 **path+query**만 봅니다.
+
+비교 단위는 두 순서열입니다. 연결 순서열이 같아야 하고, 그다음 프레임 순서열이 같아야 같음입니다. 어느 쪽이든 처음 어긋난 위치와 양쪽 값을 보고서에 적습니다.
+
+| 순서열 | 항목 | 비교하는 값 |
+|---|---|---|
+| 연결 | 열린 순서대로 | `path(+query)`, 종료 여부(`run` 끝에 닫혔는지), 오류 수. 연결·종료 횟수는 이 순서열 길이로 비교됩니다 |
+| 프레임 | 보낸·받은 순서대로 | 연결 순번, 방향(`→` sent / `←` received), 메시지 종류, (옵션) 정규화한 페이로드 |
+
+비교는 원문으로 하지만 **보고서에는 원문을 싣지 않습니다.** `report.json`·`report.md`의 프레임은 종류·바이트 수·sha256 앞 12자만, 연결 path의 쿼리 값은 `key=***`로 적습니다(`--header` 값 마스킹과 같은 기준). 원문은 `network/<scenario>.{old,new}.json`의 `ws`에만 남습니다.
+
+메시지 종류는 본문이 JSON 객체면 `messageKey`(기본 `type`) 값이고, 그 키가 없거나 JSON이 아니면 본문 앞 32자, 바이너리 프레임이면 `binary:<바이트 수>`입니다. 페이로드 정규화는 JSON이면 키를 정렬하고 공백을 지운 전문, 그 밖은 원문, 바이너리는 base64입니다.
+
+시나리오별 옵션은 모두 선택이며 기본값이 있습니다.
+
+```ts
+websocket?: {
+  ignoreQuery?: boolean;   // 연결 URL 비교에서 쿼리를 뗀다(토큰·세션 ID가 쿼리에 있을 때). 기본 false
+  messageKey?: string;     // JSON 메시지의 종류를 읽을 키. 기본 'type'
+  ignorePayload?: boolean; // 종류만 비교하고 페이로드 전문은 보지 않는다(타임스탬프·ID가 본문에 섞일 때). 기본 false
+  timeoutMs?: number;      // run 이 끝난 뒤 열린 소켓이 있으면 이만큼 프레임을 더 모은다. 기본 1000
+}
+```
+
+보고서에는 다섯째 열로 `✅ 같음 (연결 1/1, 프레임 12/12)` 꼴로 찍히고, 다르면 차이 상세에 처음 어긋난 곳과 그 앞뒤 10행 표가 붙습니다. `report.json`의 `scenarios[].ws`에 연결·프레임 요약 전체, `summary.axes.websocket`에 차이 난 시나리오 수가 들어갑니다. WebSocket 차이도 종료 코드 1입니다.
+
+알아 둘 한계가 있습니다.
+
+- 프레임은 Playwright가 보는 순서입니다. `open` 핸들러에서 동기로 `send`한 프레임은 서버가 먼저 보낸 메시지보다 앞에 기록됩니다(두 대상이 같은 코드를 돌리면 같은 순서가 나옵니다).
+- 프록시는 Upgrade 요청을 TCP 터널로 잇고 `--header`를 Upgrade 요청에도 넣습니다. 업스트림이 `https:`면 TLS로 감싸 잇습니다. 브라우저와 프록시 사이는 항상 평문 `ws:`입니다.
+- 조각 프레임·압축 확장은 Playwright가 합쳐 준 결과를 그대로 씁니다. 재연결은 새 연결로 세어져 연결 순서열에서 드러납니다.
+- 주기 push(heartbeat)가 있는 장수명 소켓은 `timeoutMs` 창 안에 몇 프레임이 들어오는지가 실행마다 흔들릴 수 있습니다. 그런 시나리오는 `run` 안에서 소켓을 닫거나(페이지 이동·로그아웃 등), `ignorePayload`와 함께 시나리오를 짧게 고정해 프레임 수를 결정적으로 만듭니다.
+- `https:` 업스트림이 자체 서명 인증서면 Node 기본 검증에 걸려 터널이 끊깁니다. 이때는 사용자가 하니스 프로세스에 `NODE_TLS_REJECT_UNAUTHORIZED=0`을 직접 주어야 합니다(하니스가 대신 끄지 않습니다).
 
 ## 설치
 
@@ -67,7 +103,7 @@ eolgae-harness run \
 
 | 코드 | 뜻 |
 |---|---|
-| 0 | 네 축 모두 차이 없음 |
+| 0 | 모든 축(스크린샷·DOM·네트워크·콘솔·WebSocket) 차이 없음 |
 | 1 | 차이가 하나라도 있음 |
 | 2 | 실행 오류(시나리오 예외·대상 기동 실패·인자 오류) |
 
@@ -159,13 +195,14 @@ interface Scenario {
   headers?: Record<string, string>;
   dom?: { root?: string; title?: boolean };            // root: 이 selector 의 첫 요소만 비교(없으면 실행 오류). title: document.title 도 비교
   network?: { apiOnly?: boolean };                     // true 면 --api-prefix 요청만(v0.1.0 동작)
+  websocket?: { ignoreQuery?: boolean; messageKey?: string; ignorePayload?: boolean; timeoutMs?: number };
 }
 function defineScenarios(list: Scenario[]): Scenario[]
 ```
 
 `dom.root`에 맞는 요소가 없으면 빈 문자열로 비교하지 않고 그 시나리오를 실행 오류(종료 2)로 보고합니다.
 
-`run`이 끝난 뒤 진행 중인 요청이 끝나길 최대 3초 기다린 다음 수집합니다. 비동기 렌더가 있으면 `run` 안에서 `waitForSelector` 등으로 상태를 고정해 두는 편이 안전합니다.
+`run`이 끝난 뒤 진행 중인 요청이 끝나길 최대 3초 기다리고, 열린 WebSocket이 있으면 `websocket.timeoutMs`(기본 1초)만큼 더 기다린 다음 수집합니다. 비동기 렌더가 있으면 `run` 안에서 `waitForSelector` 등으로 상태를 고정해 두는 편이 안전합니다.
 
 ## 개발
 

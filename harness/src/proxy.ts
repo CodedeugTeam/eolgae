@@ -5,6 +5,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import https from 'node:https';
 import net, { type AddressInfo } from 'node:net';
+import tls from 'node:tls';
 import type { Duplex } from 'node:stream';
 import { HarnessError } from './errors.ts';
 
@@ -114,8 +115,10 @@ function forward(req: IncomingMessage, res: ServerResponse, upstream: URL, injec
 }
 
 // WebSocket 등 Upgrade 요청은 TCP 터널로 그대로 잇는다. 헤더 주입은 첫 요청 줄에만 적용된다.
+// 업스트림이 https: 면 tls 로 감싸 잇는다(브라우저↔프록시 구간은 평문 ws 그대로).
 function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer, upstream: URL, inject: Record<string, string>): void {
-  const port = Number(upstream.port || (upstream.protocol === 'https:' ? 443 : 80));
+  const secure = upstream.protocol === 'https:';
+  const port = Number(upstream.port || (secure ? 443 : 80));
   const headers = buildHeaders(req, upstream, inject);
   const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
   for (const [k, v] of Object.entries(headers)) {
@@ -123,12 +126,15 @@ function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer, upstream: U
   }
   const raw = lines.join('\r\n') + '\r\n\r\n';
 
-  const upstreamSocket = net.connect(port, upstream.hostname, () => {
+  const onConnect = () => {
     upstreamSocket.write(raw);
     if (head.length > 0) upstreamSocket.write(head);
     socket.pipe(upstreamSocket);
     upstreamSocket.pipe(socket);
-  });
+  };
+  const upstreamSocket: net.Socket = secure
+    ? tls.connect({ port, host: upstream.hostname, ...(net.isIP(upstream.hostname) ? {} : { servername: upstream.hostname }) }, onConnect)
+    : net.connect(port, upstream.hostname, onConnect);
   const drop = () => {
     socket.destroy();
     upstreamSocket.destroy();

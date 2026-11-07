@@ -1,5 +1,8 @@
 // 시나리오 계약. 앱 저장소의 harness/*.spec.ts 가 이 타입과 defineScenarios 만 쓴다.
 import type { Page } from 'playwright';
+import type { WebSocketOptions } from './ws.ts';
+
+export type { WebSocketOptions };
 
 /** 시나리오가 실행되는 대상 정보. baseURL 은 하니스 프록시 주소다(브라우저는 이 포트만 본다). */
 export interface ScenarioContext {
@@ -48,6 +51,11 @@ export interface Scenario {
   headers?: Record<string, string>;
   dom?: DomOptions;
   network?: NetworkOptions;
+  /**
+   * WebSocket 축 옵션. 생략하면 기본값(ignoreQuery false, messageKey 'type', ignorePayload false, timeoutMs 1000)으로 비교한다.
+   * run 이 끝난 뒤 열린 소켓이 있으면 timeoutMs 만큼 프레임을 더 모은 다음 수집한다.
+   */
+  websocket?: WebSocketOptions;
 }
 
 /** 시나리오 목록을 검증해 돌려준다. 시나리오 파일의 default export 는 이 함수의 결과여야 한다. */

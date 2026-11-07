@@ -44,7 +44,8 @@ test('자기 대조: 같은 fixture 를 old/new 로 넣으면 네 축 차이 0, 
     assert.equal(s.console?.oldErrors, 0);
     assert.equal(s.network?.old.length, 1, '시나리오마다 /api/hello 한 번');
     assert.equal(s.network?.old[0]?.status, 200);
-    assert.equal(s.ws?.oldCount, 0);
+    assert.equal(s.ws?.old.openCount, 0);
+    assert.equal(s.ws?.equal, true);
   }
   // 프록시가 x-forwarded-user 를 넣어 줬으므로 화면에 사용자 이름이 떴고, 그 DOM 이 저장됐다.
   const dom = await readFile(join(out, 'dom', 'home.old.html'), 'utf8');

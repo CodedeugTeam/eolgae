@@ -3,7 +3,7 @@ import type { Browser, Page, Request as PwRequest } from 'playwright';
 import type { DomOptions, Scenario, ScenarioContext } from './scenario.ts';
 import type { NetworkEntry } from './normalize.ts';
 import type { ConsoleMessage } from './compare.ts';
-import { attachWsCollector, type WsEvent } from './ws.ts';
+import { attachWsCollector, WS_DEFAULTS, type WsEvent } from './ws.ts';
 
 export interface Collected {
   /** screenshot: false 인 시나리오는 undefined */
@@ -82,6 +82,10 @@ export async function collect(browser: Browser, scenario: Scenario, ctx: Scenari
 
     await withTimeout(scenario.run(page, ctx), opts.scenarioTimeoutMs ?? 60_000, `시나리오 "${scenario.name}" 시간 초과`);
     await settle(pending, opts.settleTimeoutMs ?? 3000);
+    // 열린 WebSocket 이 있으면 늦게 오는 프레임을 조금 더 기다린다(시나리오 websocket.timeoutMs, 기본 1000).
+    if (ws.openCount() > 0) {
+      await new Promise((r) => setTimeout(r, scenario.websocket?.timeoutMs ?? WS_DEFAULTS.timeoutMs));
+    }
 
     const dom = await collectDom(page, scenario.dom);
     let screenshot: Buffer | undefined;
@@ -93,7 +97,7 @@ export async function collect(browser: Browser, scenario: Scenario, ctx: Scenari
         caret: 'hide',
       });
     }
-    return { screenshot, dom, network, console: consoleMsgs, ws, durationMs: Date.now() - startedAt };
+    return { screenshot, dom, network, console: consoleMsgs, ws: ws.events, durationMs: Date.now() - startedAt };
   } finally {
     await context.close();
   }
