@@ -129,13 +129,14 @@ test('ws 자기 대조: 같은 ws-spa 를 old/new 로 넣으면 websocket 축 �
     assert.equal(s.console?.equal, true);
   }
   const home = report.scenarios.find((s) => s.name === 'ws-home')!;
-  assert.equal(home.ws?.old.connections[0]?.path, '/api/ws?token=abc');
+  assert.equal(home.ws?.old.connections[0]?.path, '/api/ws?token=***&v=***', '보고서의 쿼리 값은 가려진다');
   assert.deepEqual(home.ws?.options, { ignoreQuery: false, messageKey: 'type', ignorePayload: false, timeoutMs: 1000 });
-  assert.equal(home.ws?.old.frames[0]?.payload, '{"seq":1,"type":"ping"}', '페이로드는 키 정렬로 정규화');
+  assert.equal(home.ws?.old.frames[0]?.bytes, Buffer.byteLength('{"seq":1,"type":"ping"}'), '보고서에는 정규화한 페이로드의 바이트 수·해시만');
+  assert.match(home.ws?.old.frames[0]?.sha256 ?? '', /^[0-9a-f]{12}$/);
   const iq = report.scenarios.find((s) => s.name === 'ws-ignore-query')!;
   assert.equal(iq.ws?.old.connections[0]?.path, '/api/ws', 'ignoreQuery 면 쿼리를 뗀다');
   assert.deepEqual(iq.ws?.options, { ignoreQuery: true, messageKey: 'type', ignorePayload: true, timeoutMs: 200 });
-  assert.ok(iq.ws?.old.frames.every((f) => f.payload === undefined));
+  assert.ok(iq.ws?.old.frames.every((f) => f.bytes === undefined && f.sha256 === undefined));
 
   // backend 에 Upgrade 가 네 번(시나리오 2 × 대상 2) 도착했고, network json 에 ws 원본이 남아 있다.
   assert.equal(backend.upgrades.length, 4);
@@ -144,9 +145,16 @@ test('ws 자기 대조: 같은 ws-spa 를 old/new 로 넣으면 websocket 축 �
   assert.equal(net.ws.filter((e) => e.kind === 'sent').length, 2);
   assert.ok(net.ws.every((e) => e.conn === 0));
 
-  const json = JSON.parse(await readFile(result.reportJsonPath, 'utf8')) as typeof report;
+  const jsonText = await readFile(result.reportJsonPath, 'utf8');
+  const json = JSON.parse(jsonText) as typeof report;
   assert.equal(json.scenarios[0]?.ws?.equal, true);
   const md = await readFile(result.reportMdPath, 'utf8');
+  // 마스킹: 쿼리 값·페이로드 원문(SECRET)은 report.json/report.md 어디에도 없고 network json 원본에는 있다.
+  assert.doesNotMatch(jsonText, /SECRET/);
+  assert.doesNotMatch(md, /SECRET/);
+  const rawNet = await readFile(join(out, 'network', 'ws-home.old.json'), 'utf8');
+  assert.match(rawNet, /SECRET-QUERY/);
+  assert.match(rawNet, /SECRET-BODY/);
   assert.match(md, /\| ws-home \| — 생략 \| ✅ 같음 \| ✅ 같음 \| ✅ 같음 \| ✅ 같음 \(연결 1\/1, 프레임 5\/5\) \|/);
 });
 
@@ -160,7 +168,7 @@ test('ws 자기 대조: 보내는 메시지 순서를 바꾼 사본을 new 로 �
   const js = join(changed, '_app', 'immutable', 'entry', 'app.Ws1aB2cD.js');
   const src = await readFile(js, 'utf8');
   const ping = "  ws.send(JSON.stringify({ type: 'ping', seq: 1 }));\n";
-  const chat = "  ws.send(JSON.stringify({ type: 'chat', text: '안녕', seq: 2 }));\n";
+  const chat = "  ws.send(JSON.stringify({ type: 'chat', text: '안녕 token=SECRET-BODY', seq: 2 }));\n";
   assert.ok(src.includes(ping + chat), 'fixture 의 송신 두 줄을 찾아야 한다');
   await writeFile(js, src.replace(ping + chat, chat + ping));
 
@@ -183,6 +191,9 @@ test('ws 자기 대조: 보내는 메시지 순서를 바꾼 사본을 new 로 �
   assert.match(md, /\| ws-home \| — 생략 \| [^|]+ \| ✅ 같음 \| ✅ 같음 \| ❌ 다름 \(연결 1\/1, 프레임 5\/5\) \|/);
   assert.match(md, /#### WebSocket \(연결·프레임 순서\)/);
   assert.match(md, /처음 어긋난 곳: 프레임 0/);
-  assert.match(md, /\| \*\*0\*\* \| #0 → ping \{"seq":1,"type":"ping"\} \| #0 → chat \{"seq":2,"text":"안녕","type":"chat"\} \|/);
+  assert.match(md, /\| \*\*0\*\* \| #0 → ping \[\d+B sha256 [0-9a-f]{12}\] \| #0 → chat \[\d+B sha256 [0-9a-f]{12}\] \|/);
+  assert.match(md, /원문은 `network\/ws-home\.old\.json`, `network\/ws-home\.new\.json` 참조/);
+  assert.doesNotMatch(md, /SECRET/);
+  assert.doesNotMatch(await readFile(join(out, 'report.json'), 'utf8'), /SECRET/);
   // DOM 은 받은 메시지 순서가 바뀌어 다를 수 있다. 이 테스트의 관심은 websocket 축이므로 단정하지 않는다.
 });

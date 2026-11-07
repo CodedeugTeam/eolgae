@@ -8,7 +8,7 @@ import { startProxy, type RunningProxy } from './proxy.ts';
 import { collect, type Collected } from './collect.ts';
 import { networkSignatures, normalizeDom } from './normalize.ts';
 import { compareConsole, compareDom, compareNetwork, compareScreenshots } from './compare.ts';
-import { compareWs, WS_DEFAULTS, wsSummary } from './ws.ts';
+import { compareWs, redactWsComparison, WS_DEFAULTS, wsSummary } from './ws.ts';
 import { buildReport, renderMarkdown, scenarioStatus, type Report, type ScenarioReport } from './report.ts';
 import { scenarioSlug, type Scenario, type ScenarioContext } from './scenario.ts';
 import { HarnessError } from './errors.ts';
@@ -208,9 +208,10 @@ async function compareAndWrite(
   const consoleCmp = compareConsole(oldC.console, newC.console);
 
   // WebSocket: 원본 이벤트는 위 network json 에 함께 들어 있고, 여기서는 요약을 비교한다.
+  // 보고서에는 페이로드 원문·쿼리 값을 싣지 않는다(길이·sha256 앞 12자, key=*** 로 마스킹).
   const wsOpts = { ...WS_DEFAULTS, ...stripUndefined(scenario.websocket ?? {}) };
   const ws: ScenarioReport['ws'] = {
-    ...compareWs(wsSummary(oldC.ws, wsOpts), wsSummary(newC.ws, wsOpts)),
+    ...redactWsComparison(compareWs(wsSummary(oldC.ws, wsOpts), wsSummary(newC.ws, wsOpts))),
     compared: true,
     options: wsOpts,
     files: { old: rel(oldNetPath), new: rel(newNetPath) },

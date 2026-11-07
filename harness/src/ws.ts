@@ -2,6 +2,7 @@
 //  - 수집: 연결(open)·프레임(sent/received)·종료(close)·오류(error) 이벤트를 연결 순번과 함께 남긴다.
 //  - 정규화: 연결은 path(+query), 프레임은 (연결 순번, 방향, 메시지 종류[, 페이로드]) 로 요약한다.
 //  - 비교: 연결 순서열과 프레임 순서열을 앞에서부터 맞춰 보고 처음 어긋난 곳을 알려준다.
+import { createHash } from 'node:crypto';
 import type { Page } from 'playwright';
 
 export type WsEventKind = 'open' | 'sent' | 'received' | 'close' | 'error';
@@ -239,4 +240,89 @@ function firstMismatch<T>(a: readonly T[], b: readonly T[], fmt: (x: T) => strin
     if (xs !== ys) return { index: i, old: xs, new: ys };
   }
   return undefined;
+}
+
+// ── 보고서용 마스킹 ──────────────────────────────────────────────────────────
+// 비교는 위 요약(원문 페이로드·쿼리 포함)으로 하고, report.json/report.md 에는 아래 마스킹한 모양만 싣는다.
+// 원문은 network/<scenario>.{old,new}.json 에만 남는다(--header 값 마스킹과 같은 기준).
+
+/** 보고서에 싣는 프레임: 페이로드 원문 대신 길이와 sha256 앞 12자 */
+export interface WsFrameDigest {
+  conn: number;
+  dir: 'sent' | 'received';
+  kind: string;
+  /** 정규화한 페이로드의 바이트 수(UTF-8, 바이너리는 원 바이트 수). ignorePayload 면 없음 */
+  bytes?: number;
+  /** 정규화한 페이로드의 sha256 앞 12자(hex). ignorePayload 면 없음 */
+  sha256?: string;
+}
+
+export interface WsReportSummary {
+  /** path 의 쿼리 값은 `key=***` 로 가린다 */
+  connections: WsConnectionSignature[];
+  frames: WsFrameDigest[];
+  openCount: number;
+  closeCount: number;
+  errorCount: number;
+}
+
+export interface WsReportComparison {
+  equal: boolean;
+  old: WsReportSummary;
+  new: WsReportSummary;
+  /** 처음 어긋난 곳. old/new 문자열도 마스킹한 모양이다 */
+  firstDiff?: WsDiff;
+}
+
+/** 쿼리 값을 가린다: `/ws?token=abc&x=1` → `/ws?token=***&x=***`. 값 없는 키는 그대로 둔다. */
+export function maskQuery(path: string): string {
+  const q = path.indexOf('?');
+  if (q < 0) return path;
+  const masked = path
+    .slice(q + 1)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      return eq < 0 ? pair : `${pair.slice(0, eq)}=***`;
+    })
+    .join('&');
+  return `${path.slice(0, q)}?${masked}`;
+}
+
+export function digestFrame(f: WsFrameSignature, binary = false): WsFrameDigest {
+  const out: WsFrameDigest = { conn: f.conn, dir: f.dir, kind: f.kind };
+  if (f.payload !== undefined) {
+    const buf = binary ? Buffer.from(f.payload, 'base64') : Buffer.from(f.payload, 'utf8');
+    out.bytes = buf.length;
+    out.sha256 = createHash('sha256').update(buf).digest('hex').slice(0, 12);
+  }
+  return out;
+}
+
+export function redactWsSummary(s: WsSummary): WsReportSummary {
+  return {
+    connections: s.connections.map((c) => ({ ...c, path: maskQuery(c.path) })),
+    frames: s.frames.map((f) => digestFrame(f, f.kind.startsWith('binary:'))),
+    openCount: s.openCount,
+    closeCount: s.closeCount,
+    errorCount: s.errorCount,
+  };
+}
+
+export function formatWsFrameDigest(f: WsFrameDigest): string {
+  const arrow = f.dir === 'sent' ? '→' : '←';
+  return f.sha256 === undefined ? `#${f.conn} ${arrow} ${f.kind}` : `#${f.conn} ${arrow} ${f.kind} [${f.bytes}B sha256 ${f.sha256}]`;
+}
+
+/** 비교 결과를 보고서용으로 마스킹한다. firstDiff 의 old/new 문자열은 마스킹한 행으로 다시 만든다. */
+export function redactWsComparison(c: WsComparison): WsReportComparison {
+  const oldS = redactWsSummary(c.old);
+  const newS = redactWsSummary(c.new);
+  const out: WsReportComparison = { equal: c.equal, old: oldS, new: newS };
+  if (c.firstDiff) {
+    const rows = (s: WsReportSummary) => (c.firstDiff!.where === 'connections' ? s.connections.map(formatWsConnection) : s.frames.map(formatWsFrameDigest));
+    const i = c.firstDiff.index;
+    out.firstDiff = { where: c.firstDiff.where, index: i, old: rows(oldS)[i] ?? null, new: rows(newS)[i] ?? null };
+  }
+  return out;
 }

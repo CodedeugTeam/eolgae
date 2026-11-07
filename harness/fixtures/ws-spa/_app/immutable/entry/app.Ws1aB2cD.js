@@ -7,15 +7,20 @@ list.className = 'messages';
 app.appendChild(list);
 
 const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${proto}//${location.host}/api/ws?token=abc`);
+const ws = new WebSocket(`${proto}//${location.host}/api/ws?token=SECRET-QUERY&v=1`);
 let received = 0;
 ws.addEventListener('open', () => {
   ws.send(JSON.stringify({ type: 'ping', seq: 1 }));
-  ws.send(JSON.stringify({ type: 'chat', text: '안녕', seq: 2 }));
+  ws.send(JSON.stringify({ type: 'chat', text: '안녕 token=SECRET-BODY', seq: 2 }));
 });
 ws.addEventListener('message', (ev) => {
+  // 화면에는 메시지 종류만 그린다(본문에 비밀값이 섞여도 DOM 축 발췌에 실리지 않게).
   const li = document.createElement('li');
-  li.textContent = String(ev.data);
+  let kind = String(ev.data).slice(0, 32);
+  try {
+    kind = JSON.parse(String(ev.data)).type ?? kind;
+  } catch {}
+  li.textContent = kind;
   list.appendChild(li);
   received++;
   if (received >= 3) {

@@ -142,7 +142,7 @@ test('보고서: WebSocket 차이는 다섯째 열에 다름으로 찍히고 상
   assert.match(md, /- 처음 어긋난 곳: 프레임 0\n {2}- old: `#0 → ping`\n {2}- new: `#0 → pong`/);
   assert.match(md, /\| \*\*0\*\* \| #0 → ping \| #0 → pong \|\n\| 1 \| #0 ← pong \| #0 ← ping \|/);
   assert.match(md, /ignorePayload true/);
-  assert.match(md, /- 원본: `network\/live\.old\.json`, `network\/live\.new\.json`/);
+  assert.match(md, /- 원문은 `network\/live\.old\.json`, `network\/live\.new\.json` 참조/);
 });
 
 test('보고서: 연결 순서열이 어긋나면 연결 표를 적는다', () => {

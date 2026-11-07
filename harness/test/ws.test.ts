@@ -107,3 +107,36 @@ test('ws 페이로드 정규화: JSON 은 키 정렬·공백 제거, 그 밖은 
   assert.equal(normalizePayload({ payload: '{broken' }), '{broken');
   assert.equal(normalizePayload({ payload: 'AQID', binary: true }), 'AQID');
 });
+
+test('ws 보고서 마스킹: 쿼리 값은 key=***, 페이로드는 바이트 수·sha256 앞 12자만 남고 firstDiff 도 마스킹한 모양', async () => {
+  const { maskQuery, redactWsComparison } = await import('../src/ws.ts');
+  assert.equal(maskQuery('/api/ws?token=SECRET&v=1&flag'), '/api/ws?token=***&v=***&flag');
+  assert.equal(maskQuery('/api/ws'), '/api/ws');
+
+  const secret = sequence('ws://h/api/ws?token=SECRET').map((e) =>
+    e.payload?.includes('안녕') ? { ...e, payload: '{"type":"chat","text":"token=SECRET","seq":2}' } : e,
+  );
+  const swapped = [...secret];
+  [swapped[2], swapped[3]] = [swapped[3]!, swapped[2]!];
+  const r = redactWsComparison(compareWs(wsSummary(secret), wsSummary(swapped)));
+  const json = JSON.stringify(r);
+  assert.doesNotMatch(json, /SECRET/);
+  assert.equal(r.old.connections[0]?.path, '/api/ws?token=***');
+  const chat = r.old.frames.find((f) => f.kind === 'chat')!;
+  assert.equal(chat.bytes, Buffer.byteLength('{"seq":2,"text":"token=SECRET","type":"chat"}'));
+  assert.match(chat.sha256 ?? '', /^[0-9a-f]{12}$/);
+  assert.equal(r.firstDiff?.index, 1);
+  assert.match(r.firstDiff?.old ?? '', /^#0 → ping \[\d+B sha256 [0-9a-f]{12}\]$/);
+  assert.match(r.firstDiff?.new ?? '', /^#0 → chat \[\d+B sha256 [0-9a-f]{12}\]$/);
+  // ignorePayload 면 bytes·sha256 없이 종류만
+  const r2 = redactWsComparison(compareWs(wsSummary(secret, { ignorePayload: true }), wsSummary(secret, { ignorePayload: true })));
+  assert.ok(r2.old.frames.every((f) => f.bytes === undefined && f.sha256 === undefined));
+  // 바이너리 프레임은 base64 를 풀어 원 바이트 수
+  const bin: WsEvent[] = [
+    { conn: 0, url: 'ws://h/b', kind: 'open', t: 0 },
+    { conn: 0, url: 'ws://h/b', kind: 'sent', payload: Buffer.from([1, 2, 3]).toString('base64'), binary: true, size: 3, t: 1 },
+  ];
+  const r3 = redactWsComparison(compareWs(wsSummary(bin), wsSummary(bin)));
+  assert.equal(r3.old.frames[0]?.kind, 'binary:3');
+  assert.equal(r3.old.frames[0]?.bytes, 3);
+});

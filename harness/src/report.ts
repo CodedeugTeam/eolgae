@@ -1,7 +1,7 @@
 // 보고서. report.json(구조화)과 report.md(사람용)를 만든다.
 import type { ConsoleComparison, DomComparison, NetworkComparison, ScreenshotComparison } from './compare.ts';
 import { formatSignature } from './normalize.ts';
-import { formatWsConnection, formatWsFrame, type WsComparison } from './ws.ts';
+import { formatWsConnection, formatWsFrameDigest, type WsReportComparison } from './ws.ts';
 
 export type ScenarioStatus = 'same' | 'different' | 'error';
 
@@ -28,8 +28,11 @@ export interface NetworkAxis extends NetworkComparison {
   scope?: 'all' | 'api';
 }
 
-/** WebSocket 축. 연결 순서열(path·종료 여부)과 프레임 순서열(연결 순번·방향·종류[·페이로드])을 비교한 결과. */
-export interface WsAxis extends WsComparison {
+/**
+ * WebSocket 축. 연결 순서열(path·종료 여부)과 프레임 순서열(연결 순번·방향·종류[·페이로드])을 비교한 결과.
+ * 보고서용으로 마스킹된 모양이다: 프레임 페이로드는 길이·sha256 앞 12자만, 연결 path 의 쿼리 값은 `key=***`.
+ */
+export interface WsAxis extends WsReportComparison {
   compared: true;
   /** 비교에 쓴 옵션(기본값 채운 뒤) */
   options: { ignoreQuery: boolean; messageKey: string; ignorePayload: boolean; timeoutMs: number };
@@ -289,8 +292,8 @@ function renderWsDetail(ws: WsAxis, window = 10): string[] {
     lines.push(`  - old: ${d.old === null ? '—' : `\`${esc(d.old)}\``}`);
     lines.push(`  - new: ${d.new === null ? '—' : `\`${esc(d.new)}\``}`);
     lines.push('');
-    const oldRows = d.where === 'connections' ? ws.old.connections.map(formatWsConnection) : ws.old.frames.map(formatWsFrame);
-    const newRows = d.where === 'connections' ? ws.new.connections.map(formatWsConnection) : ws.new.frames.map(formatWsFrame);
+    const oldRows = d.where === 'connections' ? ws.old.connections.map(formatWsConnection) : ws.old.frames.map(formatWsFrameDigest);
+    const newRows = d.where === 'connections' ? ws.new.connections.map(formatWsConnection) : ws.new.frames.map(formatWsFrameDigest);
     const n = Math.max(oldRows.length, newRows.length);
     const from = Math.max(0, d.index - window);
     const to = Math.min(n, d.index + window + 1);
@@ -310,7 +313,7 @@ function renderWsDetail(ws: WsAxis, window = 10): string[] {
     }
   }
   lines.push('');
-  lines.push(`- 원본: \`${ws.files.old}\`, \`${ws.files.new}\``);
+  lines.push(`- 원문은 \`${ws.files.old}\`, \`${ws.files.new}\` 참조 (보고서에는 페이로드를 종류·바이트 수·sha256 앞 12자로, 쿼리 값은 \`key=***\` 로만 적는다)`);
   lines.push('');
   return lines;
 }
