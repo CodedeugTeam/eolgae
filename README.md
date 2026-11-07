@@ -5,7 +5,7 @@ SvelteKit 앱을 Vite + Svelte 5 정적 SPA로 옮길 때 쓰는 두 묶음을 �
 | 묶음 | import 경로 | 하는 일 |
 |---|---|---|
 | **entry** | `@codedeugteam/eolgae`, `@codedeugteam/eolgae/vite` | SvelteKit 대신 앱을 띄우는 공용 진입점: 라우터·`mount`·반응형 `page`·`goto`와, 결과물 규약(`build/`, `_app/immutable/`)을 지키는 Vite 플러그인, 앱이 복사해 소유하는 스캐폴드 3파일 |
-| **harness** | `@codedeugteam/eolgae/harness`, CLI `eolgae-harness` | **옛 빌드와 새 빌드가 같은 화면·같은 요청을 내는지** 네 축으로 비교하는 패리티 하니스. 바꾸는 코드보다 바꿨는지 확인하는 코드가 먼저라는 원칙으로, 전환 PR마다 보고서를 붙입니다 |
+| **harness** | `@codedeugteam/eolgae/harness`, CLI `eolgae-harness` | **옛 빌드와 새 빌드가 같은 화면·같은 요청을 내는지** 다섯 축(스크린샷·DOM·네트워크·콘솔·WebSocket)으로 비교하는 패리티 하니스. 바꾸는 코드보다 바꿨는지 확인하는 코드가 먼저라는 원칙으로, 전환 PR마다 보고서를 붙입니다 |
 
 먼저 entry 를 설명하고, 「무엇을 비교하나」부터는 harness 설명입니다.
 
@@ -59,17 +59,19 @@ import NotFound from './routes/NotFound.svelte';
 const routes: RouteDefinition[] = [
   { path: '/', component: Home },
   { path: '/managed', component: Managed },
-  { path: '*', component: NotFound },        // 표에 없는 경로로 직접 진입했을 때(서버가 index.html 로 폴백한 뒤) 보일 화면
+  { path: '*', component: NotFound },        // 표에 없는 경로로 직접 진입했을 때만(서버가 index.html 로 폴백한 뒤) 보일 화면
 ];
 
 mount(routes, document.getElementById('app')!, { layout: Layout });
 ```
 
-- `path` 는 `/`, `/project/:id`, `*` 세 꼴입니다. 정적 세그먼트가 `:param` 보다 우선하고 `*` 는 폴백입니다. 끝의 `/` 는 무시합니다.
+- `path` 는 `/`, `/project/:id`, `*` 세 꼴입니다. 정적 세그먼트가 `:param` 보다 우선합니다. 끝의 `/` 는 무시합니다.
+- `*` 폴백은 **직접 진입에만** 쓰입니다. 표에 없는 주소로 들어와 서버가 `index.html` 을 돌려준 뒤 첫 렌더에서 그립니다. `goto` 와 가로챈 링크에서는 `*` 만 걸리는 경로를 「라우트 없음」으로 보고 브라우저 전체 이동으로 넘깁니다(404 화면을 SPA 안에서 그리지 않습니다).
 - `layout` 은 앱이 소유하는 Svelte 컴포넌트로 `{ Page, data, params }` prop 을 받아 `<Page {data} {params} />` 를 그립니다. 패키지는 레이아웃을 Svelte 5 `mount()` 로 한 번만 올리고 이동마다 `Page` prop 을 바꿉니다. `layout` 을 주지 않으면 페이지 컴포넌트를 target 에 바로 올립니다.
 - 페이지 컴포넌트는 `{ data, params }` prop 을 받습니다(`PageProps`). 1차에서는 둘 다 각각 `undefined`·`{}` 입니다.
 - `mount()` 는 `{ unmount(): Promise<void> }` 를 돌려줍니다.
 - 첫 진입 경로가 표에 없고 `*` 도 없으면 콘솔에 에러를 내고 아무것도 그리지 않습니다. 앱은 `*` 를 두는 편이 안전합니다.
+- 라우트·match 를 직접 다루는 API 는 공개하지 않습니다. 라우트 정보는 `page.route.id`·`page.params` 로 읽습니다.
 
 ```svelte
 <!-- src/Layout.svelte -->
@@ -94,14 +96,14 @@ await goto('/managed');                        // pushState → 매칭 → page 
 await goto('/managed', { replaceState: true }); // replaceState 로
 ```
 
-`goto` 는 라우트 표에 없는 경로·다른 origin 이면 `location.href` 전체 이동으로 넘깁니다(404 화면을 그리지 않습니다). 서버 라우트(`/auth/*`, `/api`)가 섞인 앱에서 안전하도록 한 선택입니다.
+`goto` 는 라우트 표에 없는 경로(`*` 폴백만 걸리는 경로 포함)·다른 origin 이면 `location.href` 전체 이동으로 넘깁니다(404 화면을 그리지 않습니다). 서버 라우트(`/auth/*`, `/api`)가 섞인 앱에서 안전하도록 한 선택입니다. `javascript:`·`mailto:` 처럼 http(s) 가 아닌 주소는 에러를 던집니다.
 
 **내부 링크 가로채기**는 기본으로 켜져 있습니다(`mount(..., { interceptLinks: false })` 로 끔). 문서 안 `<a href>` 클릭 가운데 아래는 가로채지 않고 브라우저에 맡깁니다.
 
 - 다른 origin, `mailto:` 등 다른 스킴
 - `target` 속성(`_self` 제외), `download` 속성, `rel="external"`
 - `data-eolgae-reload`(정식) 또는 `data-sveltekit-reload`(전환기 인정) 가 앵커나 조상에 있을 때(값이 `off` 면 제외하지 않음)
-- 라우트 표에 없는 경로, 같은 문서 안 해시 이동, 보조 키(ctrl·meta·shift·alt)·가운데 버튼 클릭, 이미 `preventDefault` 된 클릭
+- 라우트 표에 없는 경로(`*` 폴백만 걸리는 경로 포함), 같은 문서 안 해시 이동(`#section`, 빈 `#`), 보조 키(ctrl·meta·shift·alt)·가운데 버튼 클릭, 이미 `preventDefault` 된 클릭
 
 뒤로가기·앞으로가기(`popstate`)도 같은 경로로 라우트를 바꿉니다. `browser` 가드는 제공하지 않습니다(정적 SPA 라 항상 브라우저).
 
@@ -114,7 +116,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { eolgae } from '@codedeugteam/eolgae/vite';
 
 export default defineConfig({
-  plugins: [svelte(), eolgae({ version: process.env.APP_VERSION })],
+  plugins: [svelte(), eolgae()],
 });
 ```
 
@@ -127,7 +129,7 @@ export default defineConfig({
 | `version` | `process.env.APP_VERSION ?? 'dev'` | `define['import.meta.env.APP_VERSION']` (JSON 문자열) |
 | `serviceWorker` | 없음 | **1차 미구현.** 값을 주면 에러 |
 
-그 외에 항상 `optimizeDeps.exclude: ['@codedeugteam/eolgae']` 를 넣습니다. 결과물은 `build/index.html` + `build/_app/immutable/<hash 자산>` + `static/` 복사본이며, Vite 기본 `dist/`·`assets/` 는 쓰지 않습니다. 모르는 경로를 `index.html` 로 폴백하는 일은 서빙 쪽(Go embed·nginx)이 하므로 `404.html` 을 만들지 않습니다.
+표의 값은 기본값입니다. 앱 `vite.config.ts` 가 `build.outDir`·`build.assetsDir`·`publicDir` 를 직접 적었으면 그 값을 존중하고, 플러그인 옵션을 주면 옵션이 이깁니다. 그 외에 항상 `optimizeDeps.exclude: ['@codedeugteam/eolgae']` 를 넣습니다. 결과물은 `build/index.html` + `build/_app/immutable/<hash 자산>` + `static/` 복사본이며, Vite 기본 `dist/`·`assets/` 는 쓰지 않습니다. 모르는 경로를 `index.html` 로 폴백하는 일은 서빙 쪽(Go embed·nginx)이 하므로 `404.html` 을 만들지 않습니다.
 
 ### 1차 범위와 미구현
 
@@ -216,7 +218,7 @@ websocket?: {
 GitHub 의존성으로 설치합니다. 설치 때 `prepare` 스크립트가 `tsc` 빌드를 돌리므로 `dist/`는 커밋하지 않습니다.
 
 ```sh
-npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.1.1"
+npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.2.0"
 npx playwright install chromium   # 앱에 chromium 이 아직 없을 때만
 ```
 

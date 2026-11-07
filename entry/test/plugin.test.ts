@@ -48,6 +48,14 @@ describe('eolgae()', () => {
     assert.equal(c.build?.assetsDir, 'a');
     assert.deepEqual(c.define, { 'import.meta.env.APP_VERSION': '"x"' });
   });
+  test('앱 vite.config 가 같은 키를 명시했으면 존중하고, 플러그인 옵션이 있으면 옵션이 이긴다', () => {
+    const respected = configOf(eolgae(), { publicDir: 'public', build: { outDir: 'out', assetsDir: 'a' } });
+    assert.equal(respected.publicDir, 'public');
+    assert.equal(respected.build?.outDir, 'out');
+    assert.equal(respected.build?.assetsDir, 'a');
+    const overridden = configOf(eolgae({ outDir: 'build2' }), { build: { outDir: 'out' } });
+    assert.equal(overridden.build?.outDir, 'build2');
+  });
   test('serviceWorker 옵션은 1차 미구현 에러', () => {
     assert.throws(() => eolgae({ serviceWorker: {} }), NotImplementedError);
   });

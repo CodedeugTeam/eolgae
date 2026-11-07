@@ -2,7 +2,6 @@
 export { page } from './page.svelte.ts';
 export { goto, replaceState, invalidateAll } from './navigation.ts';
 export { mount, type Mounted } from './mount.ts';
-export { matchRoute, type RouteMatch } from './router.ts';
 export { NotImplementedError } from './errors.ts';
 export type {
   GotoOptions,

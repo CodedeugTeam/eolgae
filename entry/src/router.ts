@@ -9,6 +9,13 @@ export interface RouteMatch {
   /** 라우트 표에 적힌 패턴 그대로. `page.route.id` 가 된다. */
   id: string;
   params: Record<string, string>;
+  /** `*` 폴백에 걸린 매치. 직접 진입(start)에서만 그리고, goto·링크 가로채기에서는 「라우트 없음」으로 본다(D-3). */
+  fallback: boolean;
+}
+
+/** goto·링크 가로채기가 SPA 이동으로 다룰 매치인지. 폴백은 브라우저 전체 이동으로 넘긴다. */
+export function isNavigable(match: RouteMatch | null): match is RouteMatch {
+  return match !== null && !match.fallback;
 }
 
 type Segment = { kind: 'static'; value: string } | { kind: 'param'; name: string };
@@ -45,7 +52,12 @@ function matchSegments(segments: Segment[], parts: string[]): Record<string, str
     if (seg.kind === 'static') {
       if (seg.value !== part) return null;
     } else {
-      params[seg.name] = decodeURIComponent(part);
+      // 잘못된 퍼센트 인코딩(`%E0%A4%A`)이면 URIError 대신 원문을 그대로 둔다.
+      try {
+        params[seg.name] = decodeURIComponent(part);
+      } catch {
+        params[seg.name] = part;
+      }
     }
   }
   return params;
@@ -86,9 +98,9 @@ export function matchRoute(routes: RouteDefinition[] | CompiledRoute[], pathname
       continue;
     }
     const params = matchSegments(c.segments, parts);
-    if (params) return { route: c.route, id: c.id, params };
+    if (params) return { route: c.route, id: c.id, params, fallback: false };
   }
-  if (fallback) return { route: fallback.route, id: fallback.id, params: {} };
+  if (fallback) return { route: fallback.route, id: fallback.id, params: {}, fallback: true };
   return null;
 }
 
@@ -138,9 +150,9 @@ export interface Router {
   /** 현재 주소로 첫 라우트를 해석하고 popstate 를 구독한다. 라우트 표에 없으면 에러(폴백 `*` 를 두면 된다). */
   start(): Promise<Resolved>;
   stop(): void;
-  /** goto 와 가로챈 링크가 부르는 이동. 라우트 표에 없거나 다른 origin 이면 전체 이동으로 넘기고 resolve 한다. */
+  /** goto 와 가로챈 링크가 부르는 이동. 라우트 표에 없거나(`*` 폴백만 걸려도) 다른 origin 이면 전체 이동으로 넘기고 resolve 한다. */
   navigate(href: string | URL, opts?: NavigateOptions): Promise<void>;
-  /** href 가 라우트 표에 있는 같은 origin 경로인지. 링크 가로채기가 쓴다. */
+  /** href 를 현재 주소 기준으로 해석하고 라우트 표와 맞춰 본다. 다른 origin 이면 match 는 null. 링크 가로채기는 `isNavigable` 로 판정한다. */
   resolve(href: string | URL): { url: URL; match: RouteMatch | null };
   readonly current: Resolved | null;
 }
@@ -207,8 +219,8 @@ export function createRouter(
       unsubscribe = env.onPopState((state) => {
         const now = new URL(env.currentHref());
         const m = matchRoute(compiled, now.pathname);
-        if (!m) {
-          // 라우트 표 밖으로 되돌아간 경우: 서버가 알아서 그리게 전체 이동(D-3).
+        if (!isNavigable(m)) {
+          // 라우트 표 밖으로 되돌아간 경우(폴백만 걸리는 경우 포함): 서버가 알아서 그리게 전체 이동(D-3).
           env.assign(now.href);
           return;
         }
@@ -229,7 +241,8 @@ export function createRouter(
     },
     async navigate(href, opts = {}) {
       const { url, match } = resolve(href);
-      if (!match) {
+      if (!isNavigable(match)) {
+        // 라우트 표에 없는 경로는 404 화면을 그리지 않고 브라우저 전체 이동으로 넘긴다(D-3). `*` 폴백은 직접 진입(start)에만 쓴다.
         env.assign(url.href);
         return;
       }

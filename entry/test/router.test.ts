@@ -1,7 +1,7 @@
 // 라우트 매칭과 라우터 상태 기계. DOM 없이 가짜 RouterEnv 로 history 동작을 확인한다.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileRoutes, createRouter, matchRoute, type Resolved, type RouterEnv } from '../src/router.ts';
+import { compileRoutes, createRouter, isNavigable, matchRoute, type Resolved, type RouterEnv } from '../src/router.ts';
 import { NotImplementedError } from '../src/errors.ts';
 import type { RouteDefinition } from '../src/types.ts';
 
@@ -35,9 +35,18 @@ describe('matchRoute', () => {
     const reversed = [...routes].reverse();
     assert.equal(matchRoute(reversed, '/project/settings')?.id, '/project/settings');
   });
-  test('* 는 폴백, 없으면 null', () => {
-    assert.equal(matchRoute(routes, '/nope/anything')?.id, '*');
+  test('* 는 폴백(fallback=true), 없으면 null. 폴백 매치는 isNavigable 이 false', () => {
+    const m = matchRoute(routes, '/nope/anything');
+    assert.equal(m?.id, '*');
+    assert.equal(m?.fallback, true);
+    assert.equal(isNavigable(m), false);
+    assert.equal(matchRoute(routes, '/')?.fallback, false);
+    assert.equal(isNavigable(matchRoute(routes, '/')), true);
     assert.equal(matchRoute(routes.slice(0, 3), '/nope'), null);
+    assert.equal(isNavigable(null), false);
+  });
+  test('잘못된 퍼센트 인코딩은 URIError 대신 원문을 둔다', () => {
+    assert.deepEqual(matchRoute(routes, '/project/%E0%A4%A')?.params, { id: '%E0%A4%A' });
   });
   test('끝의 / 는 무시한다', () => {
     assert.equal(matchRoute(routes, '/project/settings/')?.id, '/project/settings');
@@ -160,6 +169,35 @@ describe('createRouter', () => {
     await router.start();
     fake.back();
     assert.deepEqual(fake.assigned, ['http://app.test/outside']);
+  });
+
+  test('* 폴백은 직접 진입(start)에만 쓰고 goto·popstate 에서는 전체 이동으로 넘긴다(D-3)', async () => {
+    // 직접 진입: 서버가 index.html 로 폴백한 뒤라 폴백 라우트를 그린다.
+    const direct = fakeEnv('http://app.test/unknown/page');
+    const seenDirect: Resolved[] = [];
+    const r1 = createRouter(routes, direct.env, (r) => seenDirect.push(r));
+    const first = await r1.start();
+    assert.equal(first.match.id, '*');
+    assert.equal(first.component, NotFound);
+    assert.deepEqual(direct.assigned, []);
+
+    // goto: 표에 없는 경로는 404 화면 대신 브라우저 전체 이동. history·onChange 는 그대로.
+    const fake = fakeEnv();
+    const seen: Resolved[] = [];
+    const router = createRouter(routes, fake.env, (r) => seen.push(r));
+    await router.start();
+    await router.navigate('/auth/logout');
+    assert.deepEqual(fake.assigned, ['http://app.test/auth/logout']);
+    assert.equal(fake.entries.length, 1);
+    assert.equal(seen.length, 1);
+
+    // popstate 로 폴백만 걸리는 주소에 떨어져도 전체 이동.
+    const back = fakeEnv('http://app.test/unknown');
+    back.env.pushState(null, 'http://app.test/');
+    const r3 = createRouter(routes, back.env, () => {});
+    await r3.start();
+    back.back();
+    assert.deepEqual(back.assigned, ['http://app.test/unknown']);
   });
 
   test('load 가 있는 라우트·지연 로드 컴포넌트는 1차 미구현 에러로 reject 한다', async () => {

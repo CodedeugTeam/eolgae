@@ -35,6 +35,8 @@ describe('decideIntercept', () => {
   reject('data-eolgae-reload / data-sveltekit-reload opt-out', { reload: true }, 'reload-opt-out');
   reject('라우트 표에 없는 경로(서버 라우트)', { href: '/auth/logout' }, 'no-route');
   reject('같은 문서 해시 이동', { href: '/list?q=1#top' }, 'hash-only');
+  reject('빈 해시 href="#"', { href: '#' }, 'hash-only');
+  reject('상대 해시 href="#top"', { href: '#top' }, 'hash-only');
   reject('href 없음', { href: '' }, 'no-href');
   reject('보조 키(ctrl)', {}, 'modifier', { ctrlKey: true });
   reject('보조 키(meta)', {}, 'modifier', { metaKey: true });
@@ -51,6 +53,10 @@ describe('decideIntercept', () => {
 describe('미구현 API', () => {
   test('goto 는 mount 전에 부르면 안내 에러', async () => {
     await assert.rejects(goto('/x'), /mount\(\) 뒤에/);
+  });
+  test('goto 는 http(s) 외 스킴을 거부한다', async () => {
+    await assert.rejects(goto('javascript:alert(1)'), /http\(s\) 주소만/);
+    await assert.rejects(goto('mailto:a@b.c'), /http\(s\) 주소만/);
   });
   test('replaceState·invalidateAll 은 NotImplementedError', async () => {
     assert.throws(() => replaceState('/x', {}), NotImplementedError);

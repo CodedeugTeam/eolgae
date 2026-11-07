@@ -30,14 +30,15 @@ export function eolgae(opts: EolgaeOptions = {}): Plugin {
   }
   const version = opts.version ?? process.env.APP_VERSION ?? 'dev';
   const lib = opts.lib ?? 'src/lib';
-  const publicDir = opts.publicDir ?? 'static';
-  const outDir = opts.outDir ?? 'build';
-  const assetsDir = opts.assetsDir ?? '_app/immutable';
 
   return {
     name: 'eolgae',
     config(userConfig): UserConfig {
       const root = userConfig.root ? resolve(userConfig.root) : process.cwd();
+      // 설계 3.4 의 값은 「기본값」이다. 플러그인 옵션 > 앱 vite.config 에 명시한 값 > 기본값 순으로 쓴다.
+      const publicDir = opts.publicDir ?? userConfig.publicDir ?? 'static';
+      const outDir = opts.outDir ?? userConfig.build?.outDir ?? 'build';
+      const assetsDir = opts.assetsDir ?? userConfig.build?.assetsDir ?? '_app/immutable';
       const config: UserConfig = {
         publicDir,
         build: { outDir, assetsDir },

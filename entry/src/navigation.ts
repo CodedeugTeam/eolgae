@@ -1,7 +1,7 @@
 // goto·replaceState·invalidateAll 과 내부 <a href> 가로채기(D-3).
 // 활성 라우터는 mount() 가 등록한다. page.svelte.ts 를 import 하지 않아 node:test 에서 바로 불러올 수 있다.
 import type { GotoOptions } from './types.ts';
-import type { Router } from './router.ts';
+import { isNavigable, type Router } from './router.ts';
 import { NotImplementedError } from './errors.ts';
 
 let active: Router | null = null;
@@ -16,10 +16,15 @@ export function setActiveRouter(router: Router | null): void {
  * `opts.state` 는 history state 와 `page.state` 에 들어간다.
  */
 export async function goto(href: string | URL, opts: GotoOptions = {}): Promise<void> {
+  const base = typeof location !== 'undefined' ? location.href : 'http://localhost/';
+  const url = new URL(href, base);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`[eolgae] goto 는 http(s) 주소만 받습니다: "${String(href)}"`);
+  }
   if (!active) {
     throw new Error('[eolgae] goto 는 mount() 뒤에 호출해야 합니다.');
   }
-  await active.navigate(href, { replace: opts.replaceState ?? false, state: opts.state });
+  await active.navigate(url, { replace: opts.replaceState ?? false, state: opts.state });
 }
 
 /** 얕은 라우팅(D-5). 1차 범위 밖이라 호출하면 미구현 에러를 던진다. */
@@ -97,8 +102,8 @@ export function decideIntercept(
     return { intercept: false, reason: 'no-href' };
   }
   if (url.origin !== current.origin) return { intercept: false, reason: 'other-origin' };
-  // 같은 문서 안 해시 이동은 브라우저에 맡긴다.
-  if (url.hash !== '' && url.pathname === current.pathname && url.search === current.search) {
+  // 같은 문서 안 해시 이동(`#section`, 빈 `#` 포함)은 브라우저에 맡긴다.
+  if ((url.hash !== '' || link.href.startsWith('#')) && url.pathname === current.pathname && url.search === current.search) {
     return { intercept: false, reason: 'hash-only' };
   }
   if (!hasRoute(url)) return { intercept: false, reason: 'no-route' };
@@ -126,7 +131,8 @@ export function installLinkInterceptor(router: Router, doc: Document = document)
     const target = event.composedPath?.()[0] ?? event.target;
     const anchor = target instanceof Element ? target.closest('a[href]') : null;
     if (!(anchor instanceof HTMLAnchorElement)) return;
-    const decision = decideIntercept(linkInfoFromAnchor(anchor), event, location.href, (url) => router.resolve(url).match !== null);
+    // `*` 폴백만 걸리는 경로는 라우트 없음으로 보고 전체 이동에 맡긴다(D-3).
+    const decision = decideIntercept(linkInfoFromAnchor(anchor), event, location.href, (url) => isNavigable(router.resolve(url).match));
     if (!decision.intercept) return;
     event.preventDefault();
     void router.navigate(decision.url).catch((err) => {
