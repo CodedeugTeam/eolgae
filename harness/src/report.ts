@@ -1,6 +1,7 @@
 // 보고서. report.json(구조화)과 report.md(사람용)를 만든다.
 import type { ConsoleComparison, DomComparison, NetworkComparison, ScreenshotComparison } from './compare.ts';
 import { formatSignature } from './normalize.ts';
+import { formatWsConnection, formatWsFrame, type WsComparison } from './ws.ts';
 
 export type ScenarioStatus = 'same' | 'different' | 'error';
 
@@ -27,11 +28,13 @@ export interface NetworkAxis extends NetworkComparison {
   scope?: 'all' | 'api';
 }
 
-export interface WsAxis {
-  /** 비교하지 않는다. 수집 건수만 적는다. */
-  compared: false;
-  oldCount: number;
-  newCount: number;
+/** WebSocket 축. 연결 순서열(path·종료 여부)과 프레임 순서열(연결 순번·방향·종류[·페이로드])을 비교한 결과. */
+export interface WsAxis extends WsComparison {
+  compared: true;
+  /** 비교에 쓴 옵션(기본값 채운 뒤) */
+  options: { ignoreQuery: boolean; messageKey: string; ignorePayload: boolean; timeoutMs: number };
+  /** 원본 이벤트가 든 network/<scenario>.{old,new}.json */
+  files: { old: string; new: string };
 }
 
 export interface ScenarioReport {
@@ -70,14 +73,14 @@ export interface Report {
     different: number;
     error: number;
     /** 축별로 차이가 난 시나리오 수 */
-    axes: { screenshot: number; dom: number; network: number; console: number };
+    axes: { screenshot: number; dom: number; network: number; console: number; websocket: number };
   };
   /** 0 차이 없음, 1 차이 있음, 2 실행 오류 */
   exitCode: 0 | 1 | 2;
 }
 
 export function buildReport(targets: ReportTargets, scenarios: ScenarioReport[], createdAt = new Date().toISOString()): Report {
-  const axes = { screenshot: 0, dom: 0, network: 0, console: 0 };
+  const axes = { screenshot: 0, dom: 0, network: 0, console: 0, websocket: 0 };
   let same = 0;
   let different = 0;
   let error = 0;
@@ -89,6 +92,7 @@ export function buildReport(targets: ReportTargets, scenarios: ScenarioReport[],
     if (s.dom && !s.dom.equal) axes.dom++;
     if (s.network && !s.network.equal) axes.network++;
     if (s.console && !s.console.equal) axes.console++;
+    if (s.ws && !s.ws.equal) axes.websocket++;
   }
   const exitCode: 0 | 1 | 2 = error > 0 ? 2 : different > 0 ? 1 : 0;
   return {
@@ -102,13 +106,14 @@ export function buildReport(targets: ReportTargets, scenarios: ScenarioReport[],
 }
 
 /** 시나리오의 축 결과를 보고 상태를 정한다. */
-export function scenarioStatus(s: Pick<ScenarioReport, 'screenshot' | 'dom' | 'network' | 'console' | 'error'>): ScenarioStatus {
+export function scenarioStatus(s: Pick<ScenarioReport, 'screenshot' | 'dom' | 'network' | 'console' | 'ws' | 'error'>): ScenarioStatus {
   if (s.error) return 'error';
   const diffs = [
     s.screenshot && !s.screenshot.skipped && !s.screenshot.equal,
     s.dom && !s.dom.equal,
     s.network && !s.network.equal,
     s.console && !s.console.equal,
+    s.ws && !s.ws.equal,
   ];
   return diffs.some(Boolean) ? 'different' : 'same';
 }
@@ -137,18 +142,18 @@ export function renderMarkdown(report: Report): string {
   lines.push('');
   lines.push('## 시나리오 × 축');
   lines.push('');
-  lines.push('| 시나리오 | 스크린샷 | DOM | 네트워크(요청 순서) | 콘솔 에러 | WebSocket(수집만) |');
+  lines.push('| 시나리오 | 스크린샷 | DOM | 네트워크(요청 순서) | 콘솔 에러 | WebSocket(연결·프레임 순서) |');
   lines.push('|---|---|---|---|---|---|');
   for (const s of report.scenarios) {
     if (s.status === 'error') {
-      lines.push(`| ${esc(s.name)} | ⚠️ 오류 | ⚠️ 오류 | ⚠️ 오류 | ⚠️ 오류 | — |`);
+      lines.push(`| ${esc(s.name)} | ⚠️ 오류 | ⚠️ 오류 | ⚠️ 오류 | ⚠️ 오류 | ⚠️ 오류 |`);
       continue;
     }
     const shot = !s.screenshot ? NA : s.screenshot.skipped ? SKIP : s.screenshot.equal ? OK : NG;
     const dom = !s.dom ? NA : s.dom.equal ? OK : NG;
     const net = !s.network ? NA : s.network.equal ? OK : NG;
     const con = !s.console ? NA : s.console.equal ? OK : `${NG} (old ${s.console.oldErrors} / new ${s.console.newErrors})`;
-    const ws = s.ws ? `old ${s.ws.oldCount} / new ${s.ws.newCount}건` : '—';
+    const ws = !s.ws ? NA : `${s.ws.equal ? OK : NG} (${wsCounts(s.ws)})`;
     lines.push(`| ${esc(s.name)} | ${shot} | ${dom} | ${net} | ${con} | ${ws} |`);
   }
   lines.push('');
@@ -234,6 +239,9 @@ export function renderMarkdown(report: Report): string {
         lines.push(`- error/pageerror: old ${s.console.oldErrors}건, new ${s.console.newErrors}건`);
         lines.push('');
       }
+      if (s.ws && !s.ws.equal) {
+        lines.push(...renderWsDetail(s.ws));
+      }
     }
   }
 
@@ -258,4 +266,51 @@ export function renderMarkdown(report: Report): string {
 
 function esc(s: string): string {
   return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+/** 표 셀에 넣는 WebSocket 건수 요약: 연결 수와 프레임 수를 old/new 로 적는다. */
+function wsCounts(ws: WsAxis): string {
+  return `연결 ${ws.old.openCount}/${ws.new.openCount}, 프레임 ${ws.old.frames.length}/${ws.new.frames.length}`;
+}
+
+/** 차이 상세의 WebSocket 절. 처음 어긋난 곳과, 그 순서열(연결 또는 프레임)을 표로 적는다. 긴 프레임 목록은 어긋난 곳 앞뒤만 보인다. */
+function renderWsDetail(ws: WsAxis, window = 10): string[] {
+  const lines: string[] = [];
+  lines.push('#### WebSocket (연결·프레임 순서)');
+  lines.push('');
+  lines.push(`- 연결: old ${ws.old.openCount}개(종료 ${ws.old.closeCount}), new ${ws.new.openCount}개(종료 ${ws.new.closeCount})`);
+  lines.push(`- 프레임: old ${ws.old.frames.length}개, new ${ws.new.frames.length}개`);
+  lines.push(
+    `- 옵션: ignoreQuery ${ws.options.ignoreQuery}, messageKey \`${ws.options.messageKey}\`, ignorePayload ${ws.options.ignorePayload}, timeoutMs ${ws.options.timeoutMs}`,
+  );
+  const d = ws.firstDiff;
+  if (d) {
+    lines.push(`- 처음 어긋난 곳: ${d.where === 'connections' ? '연결' : '프레임'} ${d.index}`);
+    lines.push(`  - old: ${d.old === null ? '—' : `\`${esc(d.old)}\``}`);
+    lines.push(`  - new: ${d.new === null ? '—' : `\`${esc(d.new)}\``}`);
+    lines.push('');
+    const oldRows = d.where === 'connections' ? ws.old.connections.map(formatWsConnection) : ws.old.frames.map(formatWsFrame);
+    const newRows = d.where === 'connections' ? ws.new.connections.map(formatWsConnection) : ws.new.frames.map(formatWsFrame);
+    const n = Math.max(oldRows.length, newRows.length);
+    const from = Math.max(0, d.index - window);
+    const to = Math.min(n, d.index + window + 1);
+    if (from > 0) {
+      lines.push(`(앞 ${from}개 생략)`);
+      lines.push('');
+    }
+    lines.push('| # | old | new |');
+    lines.push('|---|---|---|');
+    for (let i = from; i < to; i++) {
+      const mark = i === d.index ? '**' : '';
+      lines.push(`| ${mark}${i}${mark} | ${oldRows[i] === undefined ? '—' : esc(oldRows[i]!)} | ${newRows[i] === undefined ? '—' : esc(newRows[i]!)} |`);
+    }
+    if (to < n) {
+      lines.push('');
+      lines.push(`(뒤 ${n - to}개 생략)`);
+    }
+  }
+  lines.push('');
+  lines.push(`- 원본: \`${ws.files.old}\`, \`${ws.files.new}\``);
+  lines.push('');
+  return lines;
 }

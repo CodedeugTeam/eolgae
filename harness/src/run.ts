@@ -8,6 +8,7 @@ import { startProxy, type RunningProxy } from './proxy.ts';
 import { collect, type Collected } from './collect.ts';
 import { networkSignatures, normalizeDom } from './normalize.ts';
 import { compareConsole, compareDom, compareNetwork, compareScreenshots } from './compare.ts';
+import { compareWs, WS_DEFAULTS, wsSummary } from './ws.ts';
 import { buildReport, renderMarkdown, scenarioStatus, type Report, type ScenarioReport } from './report.ts';
 import { scenarioSlug, type Scenario, type ScenarioContext } from './scenario.ts';
 import { HarnessError } from './errors.ts';
@@ -205,17 +206,28 @@ async function compareAndWrite(
   };
 
   const consoleCmp = compareConsole(oldC.console, newC.console);
-  const ws = { compared: false as const, oldCount: oldC.ws.length, newCount: newC.ws.length };
 
-  const partial = { screenshot, dom, network, console: consoleCmp };
+  // WebSocket: 원본 이벤트는 위 network json 에 함께 들어 있고, 여기서는 요약을 비교한다.
+  const wsOpts = { ...WS_DEFAULTS, ...stripUndefined(scenario.websocket ?? {}) };
+  const ws: ScenarioReport['ws'] = {
+    ...compareWs(wsSummary(oldC.ws, wsOpts), wsSummary(newC.ws, wsOpts)),
+    compared: true,
+    options: wsOpts,
+    files: { old: rel(oldNetPath), new: rel(newNetPath) },
+  };
+
+  const partial = { screenshot, dom, network, console: consoleCmp, ws };
   return {
     name: scenario.name,
     slug,
     status: scenarioStatus(partial),
     durationMs: { old: oldC.durationMs, new: newC.durationMs },
     ...partial,
-    ws,
   };
+}
+
+function stripUndefined<T extends object>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
 /** glob 또는 파일 경로 목록을 절대 경로 목록으로 푼다. 순서는 정렬해 두 대상 실행 순서가 같게 한다. */

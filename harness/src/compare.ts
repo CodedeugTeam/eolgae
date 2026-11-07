@@ -163,3 +163,7 @@ export function compareConsole(oldMsgs: ConsoleMessage[], newMsgs: ConsoleMessag
   const newErrors = newMsgs.filter(isConsoleError).length;
   return { equal: oldErrors === 0 && newErrors === 0, oldErrors, newErrors, old: oldMsgs, new: newMsgs };
 }
+
+// WebSocket 축. 정규화·비교 구현은 ws.ts 에 있고 여기서는 다른 축과 같은 자리에서 쓸 수 있게 내보낸다.
+export { compareWs, wsSummary } from './ws.ts';
+export type { WsComparison, WsDiff, WsSummary } from './ws.ts';
