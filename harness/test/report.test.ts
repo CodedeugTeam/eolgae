@@ -89,6 +89,8 @@ test('보고서: DOM·네트워크·스크린샷 차이는 상세 절에 발췌�
   assert.match(md, /첫 차이 위치: 42/);
   assert.match(md, /```html\n<h1>가<\/h1>\n```/);
   assert.match(md, /\| \*\*0\*\* \| GET \/api\/a → 200 \| GET \/api\/b → 200 \|/);
+  // scope 가 없는 v0.1.0 보고서는 apiPrefix 요청만 비교한 것으로 적는다.
+  assert.match(md, /- 범위: `\/api` 요청만/);
   assert.match(md, /- diff: `screenshots\/deep-link\/diff\.png`/);
   assert.match(md, /다른 픽셀 12개/);
 });

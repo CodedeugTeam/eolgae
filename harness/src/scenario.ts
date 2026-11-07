@@ -18,6 +18,26 @@ export interface ScreenshotOptions {
   fullPage?: boolean;
 }
 
+/** DOM 축 옵션. 비교 범위를 좁힌다. 없으면 문서 전체(document.documentElement.outerHTML)를 비교한다. */
+export interface DomOptions {
+  /**
+   * 이 CSS selector 에 맞는 첫 요소의 outerHTML 만 비교한다. 서빙 방식에 따라 달라지는 `<head>` 와
+   * 인라인 부트 스크립트를 범위 밖에 두는 용도다(예: 'main'). 요소가 없으면 그 시나리오는 실행 오류다.
+   */
+  root?: string;
+  /** true 면 document.title 을 `<title>` 로 앞에 붙여 함께 비교한다. root 로 `<head>` 가 빠질 때 쓴다. 기본 false */
+  title?: boolean;
+}
+
+/** 네트워크 축 옵션 */
+export interface NetworkOptions {
+  /**
+   * true 면 `--api-prefix` 로 시작하는 요청만 비교한다(v0.1.0 동작).
+   * 기본 false: 문서 요청·`/_app/` 자산·favicon 을 뺀 모든 요청을 (method, path+query, status) 순서로 비교한다.
+   */
+  apiOnly?: boolean;
+}
+
 export interface Scenario {
   /** 보고서와 파일 이름에 쓰이는 이름. 시나리오 파일 안에서 고유해야 한다. */
   name: string;
@@ -26,6 +46,8 @@ export interface Scenario {
   screenshot?: ScreenshotOptions | false;
   /** 이 시나리오를 돌릴 BrowserContext 에 더해지는 요청 헤더 */
   headers?: Record<string, string>;
+  dom?: DomOptions;
+  network?: NetworkOptions;
 }
 
 /** 시나리오 목록을 검증해 돌려준다. 시나리오 파일의 default export 는 이 함수의 결과여야 한다. */

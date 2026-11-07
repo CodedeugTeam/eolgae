@@ -12,25 +12,28 @@ SvelteKit 앱을 정적 SPA로 옮길 때, **옛 빌드와 새 빌드가 같은 
 | 축 | 수집 | 비교 |
 |---|---|---|
 | 스크린샷 | `page.screenshot` | pixelmatch. 시나리오별 `threshold`(기본 0.1)·`maxDiffPixelRatio`(기본 0). 크기가 다르면 차이. `screenshots/<scenario>/{old,new,diff}.png` (diff는 차이가 있을 때만) |
-| DOM | `document.documentElement.outerHTML` | 정규화 뒤 문자열 비교. 다르면 첫 차이 지점 앞뒤를 보고서에 발췌. 정규화한 전체는 `dom/<scenario>.{old,new}.html` |
-| 네트워크 | `page.on('request'/'response')` | `/_app/` 자산·문서 요청·favicon을 빼고 `--api-prefix` 요청의 `(method, path+query, status)` 순서 비교. 원본은 `network/<scenario>.{old,new}.json` |
+| DOM | `document.documentElement.outerHTML`. 시나리오 `dom.root`(CSS selector)가 있으면 그 요소의 outerHTML 만, `dom.title`이면 `document.title`을 `<title>`로 앞에 붙임 | 정규화 뒤 문자열 비교. 다르면 첫 차이 지점 앞뒤를 보고서에 발췌. 정규화한 전체는 `dom/<scenario>.{old,new}.html` |
+| 네트워크 | `page.on('request'/'response')` | 문서 요청·`/_app/` 자산·favicon을 뺀 **모든 요청**의 `(method, path+query, status)` 순서 비교. 시나리오 `network.apiOnly: true`면 `--api-prefix` 요청만(v0.1.0 동작). 원본은 `network/<scenario>.{old,new}.json` |
 | 콘솔 | `console` error 레벨·`pageerror` | 두 대상 모두 0건이어야 같음. 모든 메시지 목록을 보고서에 적음 |
 | WebSocket | `page.on('websocket')` 프레임 | **비교하지 않음**(수집 건수만 보고). 비교는 termcast 전환 때 채움 |
 
 DOM 정규화 규칙은 빌드마다 바뀌는 값만 지웁니다.
 
+- `src`·`href` 속성과 `import()` 경로의 `./`·`../` 접두어 → `/` (adapter-node는 라우트 깊이에 따른 상대 경로, adapter-static은 루트 기준 경로를 내므로 먼저 통일)
 - `/_app/immutable/<...>.<hash>.<ext>` 의 해시 조각 → `HASH` (`<script>`·`<link>`의 `/_app/` 참조 포함)
 - `class` 속성 안 `svelte-[a-z0-9]+` → `svelte-HASH`
 - `data-sveltekit-*` 속성 제거
-- 인라인 부트스트랩의 `__sveltekit_<hash>` 전역 → `__sveltekit_HASH`
+- 인라인 부트스트랩의 `__sveltekit_<hash>` 전역 → `__sveltekit_HASH`, `base: new URL("..", location).pathname.slice(0, -1)` 계산식 → `base: ""`
 - 연속 공백 → 한 칸
+
+정규화로 지워지지 않는 서빙 차이도 있습니다. adapter-node 셸은 라우트별 `<link rel="stylesheet">`를, adapter-static 셸은 `modulepreload` 목록을 `<head>`에 넣고, 이름이 해시만인 chunk(`/_app/immutable/chunks/<hash>.js`)는 빌드마다 다릅니다. 이런 앱은 시나리오에 `dom: { root: 'main', title: true }`처럼 범위를 주어 `<head>`와 인라인 부트를 비교 밖에 둡니다.
 
 ## 설치
 
 GitHub 의존성으로 설치합니다. 설치 때 `prepare` 스크립트가 `tsc` 빌드를 돌리므로 `dist/`는 커밋하지 않습니다.
 
 ```sh
-npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.1.0"
+npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.1.1"
 npx playwright install chromium   # 앱에 chromium 이 아직 없을 때만
 ```
 
@@ -132,6 +135,15 @@ export default defineScenarios([
       await page.waitForResponse((r) => r.url().includes('/api/runs/1'));
     },
     headers: { 'x-harness-case': 'rerun' },             // 이 시나리오의 BrowserContext 에만 더해지는 요청 헤더
+    network: { apiOnly: true },                          // 이 시나리오만 /api 요청으로 네트워크 축을 좁힌다
+  },
+  {
+    name: 'settings',
+    async run(page) {
+      await page.goto('/settings');
+      await page.locator('html[data-hydrated="true"]').waitFor();
+    },
+    dom: { root: 'main', title: true },                  // <head>·인라인 부트는 빼고 <main> 과 <title> 만 비교
   },
 ]);
 ```
@@ -145,9 +157,13 @@ interface Scenario {
   run(page: import('playwright').Page, ctx: ScenarioContext): Promise<void>;
   screenshot?: { threshold?: number; maxDiffPixelRatio?: number; fullPage?: boolean } | false;
   headers?: Record<string, string>;
+  dom?: { root?: string; title?: boolean };            // root: 이 selector 의 첫 요소만 비교(없으면 실행 오류). title: document.title 도 비교
+  network?: { apiOnly?: boolean };                     // true 면 --api-prefix 요청만(v0.1.0 동작)
 }
 function defineScenarios(list: Scenario[]): Scenario[]
 ```
+
+`dom.root`에 맞는 요소가 없으면 빈 문자열로 비교하지 않고 그 시나리오를 실행 오류(종료 2)로 보고합니다.
 
 `run`이 끝난 뒤 진행 중인 요청이 끝나길 최대 3초 기다린 다음 수집합니다. 비동기 렌더가 있으면 `run` 안에서 `waitForSelector` 등으로 상태를 고정해 두는 편이 안전합니다.
 
