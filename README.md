@@ -68,7 +68,7 @@ eolgae-harness run \
 | 1 | 차이가 하나라도 있음 |
 | 2 | 실행 오류(시나리오 예외·대상 기동 실패·인자 오류) |
 
-`--out` 아래에 `report.json`(구조화)과 `report.md`(시나리오×축 표, 차이 상세, 콘솔 목록, 파일 경로)가 생깁니다.
+`--out` 아래에 `report.json`(구조화)과 `report.md`(시나리오×축 표, 차이 상세, 콘솔 목록, 파일 경로)가 생깁니다. `--header`로 넣은 값은 인증 토큰일 수 있어 보고서에는 키만 남고 값은 `***`로 가려집니다.
 
 ### 예시: gatekeeper dashboard 옛 빌드(adapter-node) vs 새 빌드(adapter-static)
 
@@ -90,11 +90,18 @@ eolgae-harness run \
 
 ### 예시: 저장소 안 fixture로 자기 대조
 
+fixture SPA는 `/api/hello`를 한 번 부르므로 백엔드가 있어야 합니다. 백엔드가 없으면 fetch 실패가 양쪽 콘솔 에러로 잡혀 콘솔 축 차이로 종료 1이 납니다. 테스트가 쓰는 echo 서버를 별도 터미널에 띄워 두고 돌립니다.
+
 ```sh
+# 터미널 1: echo 백엔드(받은 요청과 x-forwarded-user 를 JSON 으로 돌려준다). 포트는 출력에 찍힌다.
+node -e "import('./harness/test/helpers/echo-server.ts').then(async (m) => { const s = await m.startEchoServer(); console.log(s.url); })"
+
+# 터미널 2: 위에 찍힌 주소를 --backend 에 넣는다.
 npm run fixtures:changed      # harness/fixtures/spa-changed 생성(글자 하나·해시 다름)
 node harness/src/cli.ts run \
   --old static:harness/fixtures/spa --new static:harness/fixtures/spa-changed \
-  --backend http://127.0.0.1:4000 --scenarios harness/fixtures/spa.spec.ts --out harness-out
+  --backend http://127.0.0.1:<echo 포트> --header x-forwarded-user=e2e-reviewer \
+  --scenarios harness/fixtures/spa.spec.ts --out harness-out
 ```
 
 같은 폴더를 old/new로 넣으면 종료 0, `spa-changed`를 new로 넣으면 DOM 축(글자)과 스크린샷 축이 다름으로 잡혀 종료 1입니다.

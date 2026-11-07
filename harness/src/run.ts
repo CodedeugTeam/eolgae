@@ -10,6 +10,9 @@ import { apiSignatures, normalizeDom } from './normalize.ts';
 import { compareConsole, compareDom, compareNetwork, compareScreenshots } from './compare.ts';
 import { buildReport, renderMarkdown, scenarioStatus, type Report, type ScenarioReport } from './report.ts';
 import { scenarioSlug, type Scenario, type ScenarioContext } from './scenario.ts';
+import { HarnessError } from './errors.ts';
+
+export { HarnessError };
 
 export interface RunOptions {
   old: string;
@@ -32,14 +35,6 @@ export interface RunResult {
   reportMdPath: string;
 }
 
-/** 실행 오류(시나리오 파일 로드 실패·대상 기동 실패 등). CLI 는 이 오류를 종료 코드 2 로 옮긴다. */
-export class HarnessError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'HarnessError';
-  }
-}
-
 export async function run(options: RunOptions): Promise<RunResult> {
   const log = options.log ?? (() => {});
   const apiPrefix = options.apiPrefix ?? '/api';
@@ -59,6 +54,9 @@ export async function run(options: RunOptions): Promise<RunResult> {
     throw new HarnessError(`시나리오 파일을 찾지 못했습니다: ${options.scenarios.join(', ')}`);
   }
   const scenarios = await loadScenarios(files);
+  if (scenarios.length === 0) {
+    throw new HarnessError(`시나리오 파일에 시나리오가 하나도 없습니다: ${files.join(', ')}`);
+  }
   log(`시나리오 ${scenarios.length}개 (${files.length}개 파일)`);
 
   await mkdir(outDir, { recursive: true });
@@ -121,7 +119,8 @@ export async function run(options: RunOptions): Promise<RunResult> {
         backend: backendURL,
         apiPrefix,
         viewport: `${viewport.width}x${viewport.height}`,
-        headers: Object.entries(headers).map(([k, v]) => `${k}=${v}`),
+        // 헤더 값은 인증 토큰일 수 있어 보고서에는 키만 남기고 값은 가린다.
+        headers: Object.keys(headers).map((k) => `${k}=***`),
         scenarioFiles: files.map((f) => relative(process.cwd(), f) || f),
       },
       results,

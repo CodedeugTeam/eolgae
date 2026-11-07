@@ -3,11 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { run } from '../src/run.ts';
+import { HarnessError, run } from '../src/run.ts';
 import type { Report } from '../src/report.ts';
 import { makeChanged } from '../fixtures/make-changed.ts';
 import { startEchoServer } from './helpers/echo-server.ts';
@@ -34,7 +34,7 @@ test('자기 대조: 같은 fixture 를 old/new 로 넣으면 네 축 차이 0, 
     backend: backend.url,
     scenarios: [spec],
     out,
-    headers: { 'x-forwarded-user': 'e2e-reviewer' },
+    headers: { 'x-forwarded-user': 'e2e-reviewer', authorization: 'Bearer SECRET-TOKEN-X' },
   });
   const { report } = result;
   assert.equal(report.exitCode, 0, JSON.stringify(report.summary));
@@ -54,10 +54,16 @@ test('자기 대조: 같은 fixture 를 old/new 로 넣으면 네 축 차이 0, 
   // backend 에 도착한 요청에도 헤더가 있다.
   assert.ok(backend.received.every((r) => r.headers['x-forwarded-user'] === 'e2e-reviewer'));
 
-  const json = JSON.parse(await readFile(result.reportJsonPath, 'utf8')) as Report;
+  const jsonText = await readFile(result.reportJsonPath, 'utf8');
+  const json = JSON.parse(jsonText) as Report;
   assert.equal(json.exitCode, 0);
   const md = await readFile(result.reportMdPath, 'utf8');
   assert.match(md, /같음 2 \/ 다름 0 \/ 오류 0/);
+  // 헤더 값은 보고서에 남지 않고 키만 남는다.
+  assert.deepEqual(json.targets.headers, ['x-forwarded-user=***', 'authorization=***']);
+  assert.doesNotMatch(jsonText, /SECRET-TOKEN-X|e2e-reviewer=/);
+  assert.doesNotMatch(md, /SECRET-TOKEN-X/);
+  assert.match(md, /주입 헤더: `x-forwarded-user=\*\*\*`, `authorization=\*\*\*`/);
   await access(join(out, 'screenshots', 'home', 'old.png'));
   await access(join(out, 'screenshots', 'home', 'new.png'));
   await assert.rejects(access(join(out, 'screenshots', 'home', 'diff.png')), '차이가 없으면 diff.png 를 만들지 않는다');
@@ -96,6 +102,24 @@ test('자기 대조: 글자 하나 바꾼 spa-changed 를 new 로 넣으면 DOM 
   const oldDom = await readFile(join(out, 'dom', 'home.old.html'), 'utf8');
   const newDom = await readFile(join(out, 'dom', 'home.new.html'), 'utf8');
   assert.equal(oldDom.replace('가', '나'), newDom, '정규화 뒤 남는 차이는 글자 하나뿐이어야 한다');
+});
+
+test('시나리오 파일은 있지만 시나리오가 0개면 실행 오류(HarnessError)', { timeout: 60_000 }, async (t) => {
+  const out = await tmpOut(t);
+  const emptySpec = join(out, 'empty.spec.ts');
+  await writeFile(emptySpec, "import { defineScenarios } from '" + join(root, 'harness', 'src', 'index.ts') + "';\nexport default defineScenarios([]);\n");
+  await assert.rejects(
+    run({ old: `static:${spa}`, new: `static:${spa}`, backend: 'http://127.0.0.1:1', scenarios: [emptySpec], out }),
+    (err: unknown) => err instanceof HarnessError && /시나리오가 하나도 없습니다/.test(err.message),
+  );
+});
+
+test('CLI: --header 형식 오류는 스택 없이 메시지만 내고 종료 코드 2', { timeout: 60_000 }, async (t) => {
+  const out = await tmpOut(t);
+  const r = await runCli(['run', '--old', `static:${spa}`, '--new', `static:${spa}`, '--backend', 'http://127.0.0.1:1', '--scenarios', spec, '--out', out, '--header', 'novalue']);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--header 형식은 k=v/);
+  assert.doesNotMatch(r.stderr, /\n\s+at /);
 });
 
 test('CLI: 필수 인자가 없으면 종료 코드 2, help 는 0', { timeout: 60_000 }, async () => {

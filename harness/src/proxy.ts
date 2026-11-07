@@ -6,6 +6,7 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import https from 'node:https';
 import net, { type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { HarnessError } from './errors.ts';
 
 export interface ProxyOptions {
   /** 비 API 요청이 가는 곳 (정적 서버 또는 url: 대상) */
@@ -28,7 +29,7 @@ export function parseHeaderArgs(list: readonly string[] | undefined): Record<str
   const out: Record<string, string> = {};
   for (const item of list ?? []) {
     const idx = item.indexOf('=');
-    if (idx <= 0) throw new Error(`--header 형식은 k=v 입니다: "${item}"`);
+    if (idx <= 0) throw new HarnessError(`--header 형식은 k=v 입니다: "${item}"`);
     out[item.slice(0, idx).trim().toLowerCase()] = item.slice(idx + 1).trim();
   }
   return out;

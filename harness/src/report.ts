@@ -48,6 +48,7 @@ export interface ReportTargets {
   backend: string;
   apiPrefix: string;
   viewport: string;
+  /** 주입 헤더. 값은 가려져 `키=***` 꼴로만 남는다. */
   headers: string[];
   scenarioFiles: string[];
 }
