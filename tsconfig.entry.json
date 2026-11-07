@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "entry/src",
+    "outDir": "dist/entry",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["node", "svelte"]
+  },
+  "include": ["entry/src/**/*.ts"]
+}

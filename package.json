@@ -1,7 +1,7 @@
 {
   "name": "@codedeugteam/eolgae",
-  "version": "0.1.1",
-  "description": "SvelteKit 앱을 정적 SPA로 옮길 때 옛 빌드와 새 빌드가 같은지 다섯 축(스크린샷·DOM·네트워크·콘솔·WebSocket)으로 비교하는 패리티 하니스",
+  "version": "0.2.0",
+  "description": "SvelteKit 앱을 정적 SPA로 옮기는 공용 진입점(entry: 라우터·mount·page·goto·Vite 플러그인)과, 옛 빌드와 새 빌드가 같은지 다섯 축(스크린샷·DOM·네트워크·콘솔·WebSocket)으로 비교하는 패리티 하니스",
   "license": "MIT",
   "private": false,
   "type": "module",
@@ -9,6 +9,15 @@
     "node": ">=24"
   },
   "exports": {
+    ".": {
+      "types": "./dist/entry/index.d.ts",
+      "svelte": "./dist/entry/index.js",
+      "default": "./dist/entry/index.js"
+    },
+    "./vite": {
+      "types": "./dist/entry/plugin.d.ts",
+      "default": "./dist/entry/plugin.js"
+    },
     "./harness": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
@@ -21,12 +30,14 @@
     "dist",
     "harness/src",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "entry/src",
+    "template"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "prepare": "tsc -p tsconfig.json",
-    "test": "node --test \"harness/test/**/*.test.ts\"",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.entry.json",
+    "prepare": "tsc -p tsconfig.json && tsc -p tsconfig.entry.json",
+    "test": "node --test \"harness/test/**/*.test.ts\" \"entry/test/**/*.test.ts\"",
     "fixtures:changed": "node harness/fixtures/make-changed.ts"
   },
   "dependencies": {
@@ -34,9 +45,17 @@
     "playwright": "^1.65.0",
     "pngjs": "^7.0.0"
   },
+  "peerDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.0.0 || ^7.0.0",
+    "svelte": "^5.51.0",
+    "vite": "^7.0.0 || ^8.0.0"
+  },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/node": "^26.6.6",
     "@types/pngjs": "^6.0.5",
-    "typescript": "^7.0.2"
+    "svelte": "^5.57.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6"
   }
 }

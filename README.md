@@ -1,9 +1,158 @@
 # eolgae
 
-SvelteKit 앱을 정적 SPA로 옮길 때, **옛 빌드와 새 빌드가 같은 화면·같은 요청을 내는지** 확인하는 패리티 하니스입니다.
-바꾸는 코드보다 바꿨는지 확인하는 코드가 먼저라는 원칙으로, 전환 PR마다 이 하니스의 보고서를 붙입니다.
+SvelteKit 앱을 Vite + Svelte 5 정적 SPA로 옮길 때 쓰는 두 묶음을 한 패키지 `@codedeugteam/eolgae`로 제공합니다.
 
-지금 저장소에는 `harness/` 패키지만 있습니다. 공용 진입점(entry) 패키지는 다음 단계에서 추가됩니다.
+| 묶음 | import 경로 | 하는 일 |
+|---|---|---|
+| **entry** | `@codedeugteam/eolgae`, `@codedeugteam/eolgae/vite` | SvelteKit 대신 앱을 띄우는 공용 진입점: 라우터·`mount`·반응형 `page`·`goto`와, 결과물 규약(`build/`, `_app/immutable/`)을 지키는 Vite 플러그인, 앱이 복사해 소유하는 스캐폴드 3파일 |
+| **harness** | `@codedeugteam/eolgae/harness`, CLI `eolgae-harness` | **옛 빌드와 새 빌드가 같은 화면·같은 요청을 내는지** 다섯 축(스크린샷·DOM·네트워크·콘솔·WebSocket)으로 비교하는 패리티 하니스. 바꾸는 코드보다 바꿨는지 확인하는 코드가 먼저라는 원칙으로, 전환 PR마다 보고서를 붙입니다 |
+
+먼저 entry 를 설명하고, 「무엇을 비교하나」부터는 harness 설명입니다.
+
+## entry: 공용 진입점
+
+Vite + Svelte 5만으로 정적 SPA를 띄웁니다. SvelteKit의 `$app/navigation`·`$app/state`에서 앱들이 실제로 쓰던 것만 같은 이름으로 제공하고, 서버 렌더링·프리렌더·폼 액션은 다루지 않습니다. 설계 결정(순수 TS 패키지, `svelte` exports 조건, 링크 가로채기 기본 켬, `$lib` 기본 제공, 얕은 라우팅 의미)은 Vault 노트 `02. Projects/eolgae/entry/entry-설계.md`에 있습니다.
+
+### 설치
+
+`vite`·`svelte`·`@sveltejs/vite-plugin-svelte`는 peerDependencies이므로 앱에 이미 있는 것을 씁니다. 지원 범위는 vite `^7 || ^8`, svelte `^5.51`, vite-plugin-svelte `^6 || ^7` 입니다. 런타임 의존성은 추가되지 않습니다.
+
+```sh
+npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.2.0"
+```
+
+패키지 `exports["."]`에는 `svelte` 조건이 있어 vite-plugin-svelte가 이 패키지를 Svelte 라이브러리로 인식하고, 플러그인 `eolgae()`가 자기 패키지를 `optimizeDeps.exclude`에 넣습니다. 둘 다 `.svelte.ts` 안의 `$state`가 dev 에서 컴파일되지 않은 채 남는 일을 막기 위한 것입니다.
+
+### 스캐폴드 3파일 복사
+
+`template/` 의 세 파일을 앱 루트에 복사해 앱이 소유합니다. 상류(Vite·Svelte)에 닿는 코드는 패키지 안에만 있고, 이 세 파일은 앱 코드입니다.
+
+| 파일 | 내용 |
+|---|---|
+| `index.html` | `<div id="app">` 와 `<script type="module" src="/src/main.ts">`. SvelteKit `app.html` 의 `%sveltekit.*%`·`data-sveltekit-*` 는 없습니다. `<head>` 링크(폰트·테마 css·manifest)는 여기로 옮깁니다 |
+| `src/main.ts` | 라우트 표와 `mount(routes, document.getElementById('app')!, { layout })` |
+| `vite.config.ts` | `svelte()` + `eolgae()`. 앱별 `server.proxy` 만 앱이 적습니다 |
+
+`tsconfig.json` 에는 `.svelte-kit/tsconfig.json` extends 대신 아래를 인라인합니다.
+
+```json
+{
+  "compilerOptions": {
+    "paths": { "$lib": ["./src/lib"], "$lib/*": ["./src/lib/*"] },
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["svelte", "vite/client"],
+    "verbatimModuleSyntax": true
+  }
+}
+```
+
+### 라우트 표와 mount
+
+```ts
+// src/main.ts
+import { mount, type RouteDefinition } from '@codedeugteam/eolgae';
+import Layout from './Layout.svelte';
+import Home from './routes/Home.svelte';
+import Managed from './routes/Managed.svelte';
+import NotFound from './routes/NotFound.svelte';
+
+const routes: RouteDefinition[] = [
+  { path: '/', component: Home },
+  { path: '/managed', component: Managed },
+  { path: '*', component: NotFound },        // 표에 없는 경로로 직접 진입했을 때만(서버가 index.html 로 폴백한 뒤) 보일 화면
+];
+
+mount(routes, document.getElementById('app')!, { layout: Layout });
+```
+
+- `path` 는 `/`, `/project/:id`, `*` 세 꼴입니다. 정적 세그먼트가 `:param` 보다 우선합니다. 끝의 `/` 는 무시합니다.
+- `*` 폴백은 **직접 진입에만** 쓰입니다. 표에 없는 주소로 들어와 서버가 `index.html` 을 돌려준 뒤 첫 렌더에서 그립니다. `goto` 와 가로챈 링크에서는 `*` 만 걸리는 경로를 「라우트 없음」으로 보고 브라우저 전체 이동으로 넘깁니다(404 화면을 SPA 안에서 그리지 않습니다).
+- `layout` 은 앱이 소유하는 Svelte 컴포넌트로 `{ Page, data, params }` prop 을 받아 `<Page {data} {params} />` 를 그립니다. 패키지는 레이아웃을 Svelte 5 `mount()` 로 한 번만 올리고 이동마다 `Page` prop 을 바꿉니다. `layout` 을 주지 않으면 페이지 컴포넌트를 target 에 바로 올립니다.
+- 페이지 컴포넌트는 `{ data, params }` prop 을 받습니다(`PageProps`). 1차에서는 둘 다 각각 `undefined`·`{}` 입니다.
+- `mount()` 는 `{ unmount(): Promise<void> }` 를 돌려줍니다.
+- 첫 진입 경로가 표에 없고 `*` 도 없으면 콘솔에 에러를 내고 아무것도 그리지 않습니다. 앱은 `*` 를 두는 편이 안전합니다.
+- 라우트·match 를 직접 다루는 API 는 공개하지 않습니다. 라우트 정보는 `page.route.id`·`page.params` 로 읽습니다.
+
+```svelte
+<!-- src/Layout.svelte -->
+<script lang="ts">
+  import { page, type LayoutProps } from '@codedeugteam/eolgae';
+  let { Page, data, params }: LayoutProps = $props();
+</script>
+
+<nav><a href="/">홈</a> <a href="/managed">관리</a> <a href="/auth/logout" data-eolgae-reload>로그아웃</a></nav>
+<p>{page.url.pathname}</p>
+<Page {data} {params} />
+```
+
+### page 와 goto
+
+```ts
+import { page, goto } from '@codedeugteam/eolgae';
+
+page.url;        // URL, 반응형. page.url.pathname 등을 템플릿에서 바로 읽는다
+page.route.id;   // 매칭된 라우트 패턴('/managed'). 없으면 null
+await goto('/managed');                        // pushState → 매칭 → page 갱신 → 컴포넌트 교체
+await goto('/managed', { replaceState: true }); // replaceState 로
+```
+
+`goto` 는 라우트 표에 없는 경로(`*` 폴백만 걸리는 경로 포함)·다른 origin 이면 `location.href` 전체 이동으로 넘깁니다(404 화면을 그리지 않습니다). 서버 라우트(`/auth/*`, `/api`)가 섞인 앱에서 안전하도록 한 선택입니다. `javascript:`·`mailto:` 처럼 http(s) 가 아닌 주소는 에러를 던집니다.
+
+**내부 링크 가로채기**는 기본으로 켜져 있습니다(`mount(..., { interceptLinks: false })` 로 끔). 문서 안 `<a href>` 클릭 가운데 아래는 가로채지 않고 브라우저에 맡깁니다.
+
+- 다른 origin, `mailto:` 등 다른 스킴
+- `target` 속성(`_self` 제외), `download` 속성, `rel="external"`
+- `data-eolgae-reload`(정식) 또는 `data-sveltekit-reload`(전환기 인정) 가 앵커나 조상에 있을 때(값이 `off` 면 제외하지 않음)
+- 라우트 표에 없는 경로(`*` 폴백만 걸리는 경로 포함), 같은 문서 안 해시 이동(`#section`, 빈 `#`), 보조 키(ctrl·meta·shift·alt)·가운데 버튼 클릭, 이미 `preventDefault` 된 클릭
+
+뒤로가기·앞으로가기(`popstate`)도 같은 경로로 라우트를 바꿉니다. `browser` 가드는 제공하지 않습니다(정적 SPA 라 항상 브라우저).
+
+### Vite 플러그인 eolgae()
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { eolgae } from '@codedeugteam/eolgae/vite';
+
+export default defineConfig({
+  plugins: [svelte(), eolgae()],
+});
+```
+
+| 옵션 | 기본값 | 넣는 설정 |
+|---|---|---|
+| `outDir` | `'build'` | `build.outDir` |
+| `assetsDir` | `'_app/immutable'` | `build.assetsDir` (해시 자산 폴더) |
+| `publicDir` | `'static'` | `publicDir` (앱들이 `static/` 을 씁니다) |
+| `lib` | `'src/lib'` | `resolve.alias['$lib']`. `false` 면 넣지 않음 |
+| `version` | `process.env.APP_VERSION ?? 'dev'` | `define['import.meta.env.APP_VERSION']` (JSON 문자열) |
+| `serviceWorker` | 없음 | **1차 미구현.** 값을 주면 에러 |
+
+표의 값은 기본값입니다. 앱 `vite.config.ts` 가 `build.outDir`·`build.assetsDir`·`publicDir` 를 직접 적었으면 그 값을 존중하고, 플러그인 옵션을 주면 옵션이 이깁니다. 그 외에 항상 `optimizeDeps.exclude: ['@codedeugteam/eolgae']` 를 넣습니다. 결과물은 `build/index.html` + `build/_app/immutable/<hash 자산>` + `static/` 복사본이며, Vite 기본 `dist/`·`assets/` 는 쓰지 않습니다. 모르는 경로를 `index.html` 로 폴백하는 일은 서빙 쪽(Go embed·nginx)이 하므로 `404.html` 을 만들지 않습니다.
+
+### 1차 범위와 미구현
+
+1차(termcast 전환)에 필요한 것만 동작합니다. 나머지는 타입과 자리를 두고 **호출하면 `NotImplementedError`** 를 던집니다.
+
+| 동작 | 미구현(호출 시 에러) |
+|---|---|
+| `mount`, `{ path, component }`, 링크 가로채기, `goto`, `page.url`·`page.route`, 플러그인(outDir·assetsDir·publicDir·`$lib`·`APP_VERSION`), 스캐폴드 3파일, `:param` 매칭과 `page.params` 채움 | `RouteDefinition.load` 와 `page.data`, `invalidateAll()`, `replaceState()` 와 `page.state`(얕은 라우팅), 지연 로드 `component: () => import(...)`, 플러그인 `serviceWorker`(서비스 워커 매니페스트), 스크롤 복원 |
+
+### 개발용 fixture
+
+`entry/fixtures/app/` 은 테스트가 `vite build`·`vite dev`·하니스 `static:` 으로 돌리는 최소 앱입니다. 패키지를 실제 설치처럼 `node_modules/@codedeugteam/eolgae` 로 소비하도록 테스트 helper 가 저장소 루트를 가리키는 심볼릭 링크를 만들고(`.gitignore` 에 있음) `resolve.preserveSymlinks` 로 경로를 node_modules 안에 둡니다. 직접 띄워 보려면:
+
+```sh
+npm run build
+node -e "import('./entry/test/helpers/fixture.ts').then((m) => m.ensureFixtureLink())"
+npx vite entry/fixtures/app          # dev
+npx vite build entry/fixtures/app    # → entry/fixtures/app/build/
+```
+
+## harness: 패리티 하니스
+
+같은 시나리오를 옛 빌드와 새 빌드에서 돌려 결과를 비교합니다. 아래 절은 모두 harness 설명입니다.
 
 ## 무엇을 비교하나
 
@@ -69,7 +218,7 @@ websocket?: {
 GitHub 의존성으로 설치합니다. 설치 때 `prepare` 스크립트가 `tsc` 빌드를 돌리므로 `dist/`는 커밋하지 않습니다.
 
 ```sh
-npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.1.1"
+npm install --save-dev "@codedeugteam/eolgae@github:CodedeugTeam/eolgae#v0.2.0"
 npx playwright install chromium   # 앱에 chromium 이 아직 없을 때만
 ```
 
@@ -209,10 +358,13 @@ function defineScenarios(list: Scenario[]): Scenario[]
 ```sh
 npm ci
 npm run build      # tsc → dist/
-npm test           # node:test (정규화·비교·보고서·정적 서버·프록시·자기 대조 e2e)
+npm test           # node:test (harness: 정규화·비교·보고서·정적 서버·프록시·자기 대조 e2e / entry: 라우터·링크 규칙·플러그인·fixture 빌드·dev·스모크)
 ```
 
-구성은 `harness/src/`(소스), `harness/test/`(테스트), `harness/fixtures/`(테스트용 최소 SPA와 시나리오)입니다.
+구성은 두 묶음입니다.
+
+- entry: `entry/src/`(소스, `.ts`·`.svelte.ts`만), `entry/test/`(node:test. 라우터·링크 규칙·플러그인 단위 테스트와 fixture 빌드·dev·하니스 스모크), `entry/fixtures/app/`(fixture 앱), `template/`(스캐폴드). 빌드는 `tsconfig.entry.json` → `dist/entry/`
+- harness: `harness/src/`(소스), `harness/test/`(테스트), `harness/fixtures/`(테스트용 최소 SPA와 시나리오). 빌드는 `tsconfig.json` → `dist/`
 
 ## 라이선스
 

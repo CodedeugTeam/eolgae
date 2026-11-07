@@ -4,3 +4,5 @@ harness-out/
 harness/fixtures/spa-changed/
 *.log
 .DS_Store
+entry/fixtures/app/node_modules/
+entry/fixtures/app/build/
