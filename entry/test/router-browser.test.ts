@@ -109,6 +109,31 @@ test('브라우저: load·replaceState·page.state·invalidateAll·popstate·오
     await page.close();
   });
 
+  await t.test('새로고침 뒤 /items?q=… 와 다른 state 가 history 에 있어도 주소 쿼리로 그리고, 상세 → 뒤로가기에서도 되살아나지 않는다', async () => {
+    const page = await browser.newPage();
+    const p = probe(page);
+    await page.goto(`${server.url}/items`);
+    await page.waitForSelector('[data-page="items"]');
+    await page.fill('[data-testid="filter"]', 'apple');
+    // 주소만 q=blue 로 바꾸고 history 항목의 state 는 apple 로 남긴다(필터를 바꾸고 다시 바꾼 뒤 주소만 남은 상황).
+    await page.evaluate(() => history.replaceState(history.state, '', '/items?q=blue'));
+    await page.reload();
+    await page.waitForSelector('[data-page="items"]');
+    assert.equal(await text(page, 'state'), '{}');
+    assert.equal(await page.inputValue('[data-testid="filter"]'), 'blue');
+    assert.equal(await text(page, 'count'), '1');
+    assert.deepEqual(await page.evaluate(() => history.state?.state), {}, 'history 항목의 state 도 버린다');
+    await page.click('text=blueberry');
+    await page.waitForSelector('[data-page="item-detail"]');
+    await page.goBack();
+    await page.waitForSelector('[data-page="items"]');
+    await page.waitForFunction(() => document.querySelector('[data-testid="count"]')?.textContent === '1');
+    assert.equal(await text(page, 'state'), '{}');
+    assert.equal(await page.inputValue('[data-testid="filter"]'), 'blue', '앞 문서의 apple 이 아니라 주소 쿼리');
+    assert.deepEqual(p.errors, []);
+    await page.close();
+  });
+
   await t.test('해시 링크와 그 뒤로가기는 load 를 돌리지 않는다(얕은 이동)', async () => {
     const page = await browser.newPage();
     const p = probe(page);

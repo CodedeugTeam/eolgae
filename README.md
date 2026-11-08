@@ -162,7 +162,7 @@ await invalidateAll();                                      // 현재 라우트�
 
 - `replaceState(href, state)` 는 현재 history 항목을 바꾸고 `page.state` 만 갱신합니다. **`page.url` 은 바꾸지 않고** `load`·컴포넌트도 건드리지 않습니다(SvelteKit 얕은 라우팅과 같음). 그래서 화면 상태는 `page.state` 를 먼저 읽고 없으면 `page.url` 에서 읽는 꼴로 씁니다.
 - 뒤로가기·앞으로가기는 두 가지입니다. 같은 이동에서 생긴 항목으로 돌아가거나(예: 해시 링크를 누른 뒤 뒤로가기) 경로·쿼리가 같고 해시만 다르면 **얕은 이동**이라 `load` 를 돌리지 않고 `page.url`·`page.state` 만 바꿉니다. 그 밖은 **깊은 이동**이라 `load` 를 다시 돌린 뒤 그 항목에 저장된 state 를 `page.state` 로 되살립니다. `replaceState` 로 주소창만 바꾼 항목으로 돌아오면 `load` 의 `url`·`page.url` 은 그때의 `page.url` 입니다.
-- 새로고침하면 `page.state` 는 빈 객체로 시작합니다(history 에 남은 state 를 되살리지 않습니다). 화면은 주소(쿼리)로 다시 그립니다.
+- 새로고침하면 `page.state` 는 빈 객체로 시작하고, 라우터가 만든 history 항목의 state 도 버립니다(SvelteKit 과 같음). 그래서 새로고침 뒤 다른 화면에 갔다가 뒤로가기로 돌아와도 앞 문서의 state 는 되살아나지 않고, 화면은 주소(쿼리)로 다시 그립니다. 이전 버전(v0.3.0)은 이 경우 `goto` 의 `state` 를 되살렸습니다.
 - `invalidateAll()` 은 현재 `page.url` 로 `load` 를 다시 돌려 `data`·`page.data` 를 바꿉니다. 컴포넌트는 그대로이고, 같은 틱에 여러 번 불러도 한 번만 돕니다. **`page.state` 는 빈 객체로 돌아갑니다**(SvelteKit 과 같음). 그래서 `replaceState` 로 바꾼 필터는 `page.url` 기준으로 돌아가고 주소창·history 항목은 그대로입니다.
 - history 항목의 `state` 에는 `{ eolgae: 1, nav, url?, state }` 꼴로 라우터 표식과 내비게이션 번호를 함께 넣습니다. 앱은 `history.state` 를 직접 읽지 말고 `page.state` 를 씁니다. 표식이 없는 항목(앱 밖에서 생긴 항목)은 그 `history.state` 를 그대로 `page.state` 로 씁니다.
 

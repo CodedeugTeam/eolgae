@@ -602,7 +602,7 @@ describe('popstate 얕은·깊은 이동', () => {
     assert.equal(calls.length, 2, '앞으로가기(해시만 다름)도 얕은 이동');
   });
 
-  test('새로고침: history 의 state 를 page.state 로 되살리지 않고 load 는 한 번, 내비게이션 번호는 이어 쓴다', async () => {
+  test('새로고침: history 의 state 를 버리고(표식·번호는 유지) load 는 한 번, 내비게이션 번호는 이어 쓴다', async () => {
     const { routes: r, calls } = loadRoutes();
     const fake = fakeEnv('http://app.test/list');
     const first = createRouter(r, fake.env, () => {});
@@ -620,12 +620,48 @@ describe('popstate 얕은·깊은 이동', () => {
     const kept = fake.entries[0]?.state;
     assert.ok(isHistoryEntry(kept));
     assert.equal(kept.url, undefined, '앞 문서의 page.url 은 지운다. 새 page.url 은 주소창 주소');
+    assert.deepEqual(kept.state, {}, 'state 는 버린다');
     assert.equal(fake.entries[0]?.href, 'http://app.test/list?q=1');
     hashClick(fake, 'http://app.test/list?q=1#top', pop());
     fake.back();
     await tick();
     assert.equal(calls.length, 2, '이어 쓴 번호라 뒤로가기가 얕은 이동');
-    assert.deepEqual(seen.at(-1)?.state, { f: 1 });
+    assert.deepEqual(seen.at(-1)?.state, {});
+  });
+
+  test('새로고침 뒤 주소 쿼리와 다른 state 가 history 에 있어도 다른 화면 → 뒤로가기에서 되살아나지 않는다', async () => {
+    const { routes: r, calls } = loadRoutes();
+    const fake = fakeEnv('http://app.test/list?q=blue');
+    // 앞 문서가 남긴 항목: 주소는 q=blue 인데 state 는 다른 값
+    fake.entries[0]!.state = { eolgae: 1, nav: 1000, url: 'http://app.test/list', state: { filter: 'apple' } };
+    const seen: Resolved[] = [];
+    const router = createRouter(r, fake.env, (x) => seen.push(x));
+    await router.start();
+    assert.deepEqual(seen[0]?.state, {});
+    assert.equal(seen[0]?.url.href, 'http://app.test/list?q=blue', 'page.url 은 주소창 주소');
+    await router.navigate('/detail/1');
+    fake.back();
+    await tick();
+    assert.equal(calls.length, 3);
+    assert.equal(calls.at(-1)?.url, 'http://app.test/list?q=blue');
+    assert.deepEqual(seen.at(-1)?.state, {}, '앞 문서의 { filter: apple } 은 되살리지 않는다');
+  });
+
+  test('새로고침: load 없는 라우트도 goto state 를 되살리지 않는다', async () => {
+    const fake = fakeEnv();
+    const first = createRouter(routes, fake.env, () => {});
+    await first.start();
+    await first.navigate('/project/1', { state: { from: 'home' } });
+    first.stop();
+    const seen: Resolved[] = [];
+    const reloaded = createRouter(routes, fake.env, (x) => seen.push(x));
+    await reloaded.start();
+    assert.deepEqual(seen[0]?.state, {});
+    await reloaded.navigate('/');
+    fake.back();
+    await tick();
+    assert.equal(seen.at(-1)?.match.id, '/project/:id');
+    assert.deepEqual(seen.at(-1)?.state, {});
   });
 });
 

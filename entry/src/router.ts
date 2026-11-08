@@ -331,9 +331,11 @@ export function createRouter(
       currentNav = isHistoryEntry(raw) ? raw.nav : nextNav();
       lastNav = Math.max(lastNav, currentNav);
       shownUrl = url;
-      // replaceState 가 남긴 page.url 은 앞 문서의 것이다. 새 문서의 page.url 은 주소창 주소이므로 지운다(SvelteKit 도 지운다).
-      if (isHistoryEntry(raw) && raw.url !== undefined) {
-        env.replaceState({ eolgae: 1, nav: raw.nav, state: raw.state } satisfies HistoryEntry, url.href);
+      // 라우터가 만든 항목이면 표식·번호만 남기고 state 와 page.url 을 버린다(SvelteKit 도 새로고침 때 state 를 비운다).
+      // 새 문서의 화면은 주소(쿼리)로 다시 그리므로, 버리지 않으면 뒤로가기로 이 항목에 돌아올 때 앞 문서의 state 가
+      // 주소와 다른 값으로 되살아날 수 있다. 표식 없는 항목은 그대로 둔다.
+      if (isHistoryEntry(raw)) {
+        env.replaceState({ eolgae: 1, nav: raw.nav, state: {} } satisfies HistoryEntry, url.href);
       }
       unsubscribe?.();
       unsubscribe = env.onPopState(onPopState);
