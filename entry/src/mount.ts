@@ -16,7 +16,7 @@ export function mount(routes: RouteDefinition[], target: Element, opts: MountOpt
   if (!(target instanceof Element)) {
     throw new Error('[eolgae] mount 의 target 이 Element 가 아닙니다. index.html 의 <div id="app"> 를 확인하세요.');
   }
-  const { layout, interceptLinks = true } = opts;
+  const { layout, interceptLinks = true, error } = opts;
 
   // 레이아웃이 있으면 한 번만 올리고 Page prop 을 바꾼다. 없으면 페이지 컴포넌트를 갈아 끼운다.
   let layoutProps: ReturnType<typeof createLayoutProps> | null = null;
@@ -25,7 +25,7 @@ export function mount(routes: RouteDefinition[], target: Element, opts: MountOpt
   let currentComponent: Component<PageProps> | null = null;
 
   const render = (r: Resolved) => {
-    setPage({ url: r.url, params: r.match.params, state: r.state, data: r.data, route: { id: r.match.id } });
+    setPage({ url: r.url, params: r.match.params, state: r.state, data: r.data, route: { id: r.match.id }, status: r.status, error: r.error });
     if (layout) {
       if (!layoutProps) {
         layoutProps = createLayoutProps({ Page: r.component, data: r.data, params: r.match.params });
@@ -48,7 +48,7 @@ export function mount(routes: RouteDefinition[], target: Element, opts: MountOpt
     instance = svelteMount(r.component, { target, props: pageProps });
   };
 
-  const router = createRouter(routes, browserEnv(), render);
+  const router = createRouter(routes, browserEnv(), render, { error });
   setActiveRouter(router);
   const uninstall = interceptLinks ? installLinkInterceptor(router) : () => {};
 

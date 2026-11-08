@@ -72,7 +72,7 @@ mount(routes, document.getElementById('app')!, { layout: Layout });
 - `path` 는 `/`, `/project/:id`, `*` 세 꼴입니다. 정적 세그먼트가 `:param` 보다 우선합니다. 끝의 `/` 는 무시합니다.
 - `*` 폴백은 **직접 진입에만** 쓰입니다. 표에 없는 주소로 들어와 서버가 `index.html` 을 돌려준 뒤 첫 렌더에서 그립니다. `goto` 와 가로챈 링크에서는 `*` 만 걸리는 경로를 「라우트 없음」으로 보고 브라우저 전체 이동으로 넘깁니다(404 화면을 SPA 안에서 그리지 않습니다).
 - `layout` 은 앱이 소유하는 Svelte 컴포넌트로 `{ Page, data, params }` prop 을 받아 `<Page {data} {params} />` 를 그립니다. 패키지는 레이아웃을 Svelte 5 `mount()` 로 한 번만 올리고 이동마다 `Page` prop 을 바꿉니다. `layout` 을 주지 않으면 페이지 컴포넌트를 target 에 바로 올립니다.
-- 페이지 컴포넌트는 `{ data, params }` prop 을 받습니다(`PageProps`). 1차에서는 둘 다 각각 `undefined`·`{}` 입니다.
+- 페이지 컴포넌트는 `{ data, params }` prop 을 받습니다(`PageProps`). `data` 는 라우트 `load` 의 반환값이고 `load` 가 없으면 `undefined` 입니다. 같은 페이지 컴포넌트로 이동하면 인스턴스를 다시 만들지 않고 `data`·`params` prop 만 바꿉니다.
 - `mount()` 는 `{ unmount(): Promise<void> }` 를 돌려줍니다.
 - 첫 진입 경로가 표에 없고 `*` 도 없으면 콘솔에 에러를 내고 아무것도 그리지 않습니다. 앱은 `*` 를 두는 편이 안전합니다.
 - 라우트·match 를 직접 다루는 API 는 공개하지 않습니다. 라우트 정보는 `page.route.id`·`page.params` 로 읽습니다.
@@ -96,8 +96,9 @@ import { page, goto } from '@codedeugteam/eolgae';
 
 page.url;        // URL, 반응형. page.url.pathname 등을 템플릿에서 바로 읽는다
 page.route.id;   // 매칭된 라우트 패턴('/managed'). 없으면 null
-await goto('/managed');                        // pushState → 매칭 → page 갱신 → 컴포넌트 교체
+await goto('/managed');                        // 매칭 → (load) → pushState → page 갱신 → 컴포넌트 교체
 await goto('/managed', { replaceState: true }); // replaceState 로
+await goto('/managed', { state: { from: 'home' } }); // page.state 로 들어간다
 ```
 
 `goto` 는 라우트 표에 없는 경로(`*` 폴백만 걸리는 경로 포함)·다른 origin 이면 `location.href` 전체 이동으로 넘깁니다(404 화면을 그리지 않습니다). 서버 라우트(`/auth/*`, `/api`)가 섞인 앱에서 안전하도록 한 선택입니다. `javascript:`·`mailto:` 처럼 http(s) 가 아닌 주소는 에러를 던집니다.
@@ -109,7 +110,71 @@ await goto('/managed', { replaceState: true }); // replaceState 로
 - `data-eolgae-reload`(정식) 또는 `data-sveltekit-reload`(전환기 인정) 가 앵커나 조상에 있을 때(값이 `off` 면 제외하지 않음)
 - 라우트 표에 없는 경로(`*` 폴백만 걸리는 경로 포함), 같은 문서 안 해시 이동(`#section`, 빈 `#`), 보조 키(ctrl·meta·shift·alt)·가운데 버튼 클릭, 이미 `preventDefault` 된 클릭
 
-뒤로가기·앞으로가기(`popstate`)도 같은 경로로 라우트를 바꿉니다. `browser` 가드는 제공하지 않습니다(정적 SPA 라 항상 브라우저).
+뒤로가기·앞으로가기(`popstate`)도 같은 경로로 라우트를 바꿉니다(얕은 이동은 아래 「replaceState 와 page.state」). `browser` 가드는 제공하지 않습니다(정적 SPA 라 항상 브라우저).
+
+### load 와 오류 화면
+
+라우트에 `load` 를 두면 이동할 때마다 실행하고, 반환값이 페이지의 `data` prop 이자 `page.data` 가 됩니다. SvelteKit `+page.ts` 의 `load` 를 옮긴 것으로, 받는 인자는 `{ fetch, params, url }` 셋입니다. `fetch` 는 전역 fetch 이며 상대 URL 은 문서 주소 기준으로 풀립니다.
+
+```ts
+import { error, mount, type LoadEvent, type RouteDefinition } from '@codedeugteam/eolgae';
+
+async function detailLoad({ fetch, params, url }: LoadEvent) {
+  const id = Number(params.id);
+  if (!Number.isInteger(id)) error(400, 'Invalid id');     // 옛 코드: import { error } from '@sveltejs/kit'
+  const res = await fetch(`/api/items/${id}`);
+  if (!res.ok) throw new Error(`load failed (${res.status})`);
+  return { item: await res.json(), returnTo: url.searchParams.get('returnTo') };
+}
+
+const routes: RouteDefinition[] = [
+  { path: '/items/:id', component: Detail, load: detailLoad },
+  { path: '*', component: NotFound },
+];
+mount(routes, document.getElementById('app')!, { layout: Layout, error: ErrorPage });
+```
+
+- 순서는 SvelteKit 과 같습니다: 매칭 → `load` → (끝나면) history 기록 → `page` 갱신 → 컴포넌트 교체. `load` 가 도는 동안에는 이전 화면이 그대로 보이고, `goto` 는 화면이 바뀐 뒤에 끝납니다. 이동이 겹치면 마지막 것만 반영합니다.
+- `load` 가 없는 라우트는 이전 버전과 같게 history 를 먼저(`goto` 를 부른 그 자리에서) 기록합니다.
+- `load` 가 던지면 `mount` 옵션 `error` 컴포넌트를 레이아웃의 `Page` 자리에 그리고 주소는 기록합니다. `error(status, message)` 로 던지면 `page.status`·`page.error.message` 가 그 값이고 콘솔에 남기지 않습니다. 그 밖의 오류는 `500`·`Internal Error` 이며 오류 객체를 `console.error` 로 남깁니다(SvelteKit 기본 동작과 같음). `error` 옵션을 주지 않으면 오류를 그대로 던집니다(`goto` 는 reject, 주소·화면은 그대로).
+- 정상 화면의 `page.status` 는 `200`, `page.error` 는 `null` 입니다.
+
+SvelteKit 기본 오류 화면과 같게 하려면 오류 컴포넌트를 이렇게 둡니다.
+
+```svelte
+<!-- src/ErrorPage.svelte -->
+<script lang="ts">
+  import { page } from '@codedeugteam/eolgae';
+</script>
+
+<h1>{page.status}</h1>
+<p>{page.error?.message}</p>
+```
+
+### replaceState 와 page.state, invalidateAll
+
+```ts
+import { page, replaceState, invalidateAll } from '@codedeugteam/eolgae';
+
+replaceState('/?q=abc', { ...page.state, filter: 'abc' }); // 주소창과 page.state 만 바꾼다. '' 이면 주소는 그대로
+await invalidateAll();                                      // 현재 라우트의 load 를 다시 돌려 data 를 바꾼다
+```
+
+- `replaceState(href, state)` 는 현재 history 항목을 바꾸고 `page.state` 만 갱신합니다. **`page.url` 은 바꾸지 않고** `load`·컴포넌트도 건드리지 않습니다(SvelteKit 얕은 라우팅과 같음). 그래서 화면 상태는 `page.state` 를 먼저 읽고 없으면 `page.url` 에서 읽는 꼴로 씁니다.
+- 뒤로가기·앞으로가기는 두 가지입니다. 같은 이동에서 생긴 항목으로 돌아가거나(예: 해시 링크를 누른 뒤 뒤로가기) 경로·쿼리가 같고 해시만 다르면 **얕은 이동**이라 `load` 를 돌리지 않고 `page.url`·`page.state` 만 바꿉니다. 그 밖은 **깊은 이동**이라 `load` 를 다시 돌린 뒤 그 항목에 저장된 state 를 `page.state` 로 되살립니다. `replaceState` 로 주소창만 바꾼 항목으로 돌아오면 `load` 의 `url`·`page.url` 은 그때의 `page.url` 입니다.
+- 새로고침하면 `page.state` 는 빈 객체로 시작합니다(history 에 남은 state 를 되살리지 않습니다). 화면은 주소(쿼리)로 다시 그립니다.
+- `invalidateAll()` 은 현재 `page.url` 로 `load` 를 다시 돌려 `data`·`page.data` 를 바꿉니다. 컴포넌트는 그대로이고, 같은 틱에 여러 번 불러도 한 번만 돕니다. **`page.state` 는 빈 객체로 돌아갑니다**(SvelteKit 과 같음). 그래서 `replaceState` 로 바꾼 필터는 `page.url` 기준으로 돌아가고 주소창·history 항목은 그대로입니다.
+- history 항목의 `state` 에는 `{ eolgae: 1, nav, url?, state }` 꼴로 라우터 표식과 내비게이션 번호를 함께 넣습니다. 앱은 `history.state` 를 직접 읽지 말고 `page.state` 를 씁니다. 표식이 없는 항목(앱 밖에서 생긴 항목)은 그 `history.state` 를 그대로 `page.state` 로 씁니다.
+
+### 스토리·테스트에서 page 정하기
+
+`mount` 없이 컴포넌트를 그리는 Storybook·단위 테스트에서는 `@codedeugteam/eolgae/testing` 의 `setPage` 로 `page` 값을 정합니다. 준 필드만 바뀌고, `url` 은 문자열이면 현재 문서 주소 기준으로 풉니다.
+
+```ts
+import { setPage } from '@codedeugteam/eolgae/testing';
+
+setPage({ url: '/?status=failed', state: {} }); // SvelteKit Storybook 의 page 목업 대신
+```
 
 ### Vite 플러그인 eolgae()
 
@@ -193,13 +258,13 @@ if ('serviceWorker' in navigator) {
 - dev 서버는 `/service-worker.js` 요청에 소스를 import 하는 한 줄(`import '/@fs/<절대 경로>/src/service-worker.ts';`)을 돌려주고, 가상 모듈은 `build: []` 를 냅니다. SvelteKit 2 dev 와 같은 동작이라 dev 에서도 등록·설치됩니다.
 - 서비스 워커 안에서 가상 모듈 밖의 앱 전용 모듈(DOM 을 쓰는 코드 등)은 import 하지 않습니다. 가상 모듈을 서비스 워커가 아닌 앱 코드에서 import 하면 에러가 납니다.
 
-### 1차 범위와 미구현
+### 구현 범위와 미구현
 
-1차(termcast 전환)에 필요한 것만 동작합니다. 나머지는 타입과 자리를 두고 **호출하면 `NotImplementedError`** 를 던집니다.
+소비 앱이 실제로 쓰는 것만 동작합니다. 나머지 가운데 타입이 있는 것은 **호출하면 `NotImplementedError`** 를 던지고, 표의 「제공하지 않음」은 API 자체가 없습니다.
 
-| 동작 | 미구현(호출 시 에러) |
-|---|---|
-| `mount`, `{ path, component }`, 링크 가로채기, `goto`, `page.url`·`page.route`, 플러그인(outDir·assetsDir·publicDir·`$lib`·`APP_VERSION`·`serviceWorker`), 스캐폴드 3파일, `:param` 매칭과 `page.params` 채움 | `RouteDefinition.load` 와 `page.data`, `invalidateAll()`, `replaceState()` 와 `page.state`(얕은 라우팅), 지연 로드 `component: () => import(...)`, 스크롤 복원 |
+| 동작 | 미구현(호출 시 에러) | 제공하지 않음 |
+|---|---|---|
+| `mount`(`layout`·`error`·`interceptLinks`), `{ path, component, load }`, 링크 가로채기, `goto`(`replaceState`·`state`), `page.url`·`page.route`·`page.params`·`page.data`·`page.state`·`page.status`·`page.error`, `load({ fetch, params, url })` 와 `error(status, message)`, `replaceState()`(얕은 라우팅), `invalidateAll()`, 얕은·깊은 popstate, `@codedeugteam/eolgae/testing` 의 `setPage`, 플러그인(outDir·assetsDir·publicDir·`$lib`·`APP_VERSION`·`serviceWorker`), 스캐폴드 3파일, `:param` 매칭 | 지연 로드 `component: () => import(...)` | 스크롤 복원, `pushState`, `invalidate(url)`·`depends`, 레이아웃 `load`·`parent()`, `redirect()`, `beforeNavigate`·`afterNavigate`·`onNavigate`·`navigating`, 미리 불러오기(preload) |
 
 ### 개발용 fixture
 
