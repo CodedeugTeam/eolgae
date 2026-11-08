@@ -1,6 +1,6 @@
 {
   "name": "@codedeugteam/eolgae",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "SvelteKit 앱을 정적 SPA로 옮기는 공용 진입점(entry: 라우터·mount·page·goto·Vite 플러그인)과, 옛 빌드와 새 빌드가 같은지 다섯 축(스크린샷·DOM·네트워크·콘솔·WebSocket)으로 비교하는 패리티 하니스",
   "license": "MIT",
   "private": false,
