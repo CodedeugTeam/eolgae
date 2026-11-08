@@ -18,6 +18,11 @@
       "types": "./dist/entry/plugin.d.ts",
       "default": "./dist/entry/plugin.js"
     },
+    "./testing": {
+      "types": "./dist/entry/testing.d.ts",
+      "svelte": "./dist/entry/testing.js",
+      "default": "./dist/entry/testing.js"
+    },
     "./service-worker": {
       "types": "./entry/src/virtual-service-worker.d.ts"
     },

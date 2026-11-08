@@ -6,6 +6,7 @@
 <nav>
   <a href="/" data-testid="nav-home">홈</a>
   <a href="/about" data-testid="nav-about">소개</a>
+  <a href="/items" data-testid="nav-items">목록</a>
   <a href="/legacy-page" data-testid="nav-legacy" data-eolgae-reload>옛 페이지(전체 이동)</a>
   <a href="/not-in-table" data-testid="nav-unknown">표에 없는 경로</a>
   <a href="https://example.com/" data-testid="nav-external">외부</a>

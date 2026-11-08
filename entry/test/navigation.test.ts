@@ -1,8 +1,7 @@
-// 링크 가로채기 제외 규칙(D-3)과 미구현 API 의 에러.
+// 링크 가로채기 제외 규칙(D-3)과 mount 전 호출 에러.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { decideIntercept, goto, invalidateAll, replaceState, type ClickInfo, type LinkInfo } from '../src/navigation.ts';
-import { NotImplementedError } from '../src/errors.ts';
 
 const click: ClickInfo = { button: 0, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, defaultPrevented: false };
 const current = 'http://app.test/list?q=1';
@@ -50,7 +49,7 @@ describe('decideIntercept', () => {
   });
 });
 
-describe('미구현 API', () => {
+describe('mount 전 호출', () => {
   test('goto 는 mount 전에 부르면 안내 에러', async () => {
     await assert.rejects(goto('/x'), /mount\(\) 뒤에/);
   });
@@ -58,8 +57,8 @@ describe('미구현 API', () => {
     await assert.rejects(goto('javascript:alert(1)'), /http\(s\) 주소만/);
     await assert.rejects(goto('mailto:a@b.c'), /http\(s\) 주소만/);
   });
-  test('replaceState·invalidateAll 은 NotImplementedError', async () => {
-    assert.throws(() => replaceState('/x', {}), NotImplementedError);
-    await assert.rejects(invalidateAll(), NotImplementedError);
+  test('replaceState·invalidateAll 은 mount 전에 부르면 안내 에러', async () => {
+    assert.throws(() => replaceState('/x', {}), /mount\(\) 뒤에/);
+    await assert.rejects(invalidateAll(), /mount\(\) 뒤에/);
   });
 });

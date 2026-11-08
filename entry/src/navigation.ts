@@ -2,7 +2,6 @@
 // 활성 라우터는 mount() 가 등록한다. page.svelte.ts 를 import 하지 않아 node:test 에서 바로 불러올 수 있다.
 import type { GotoOptions } from './types.ts';
 import { isNavigable, type Router } from './router.ts';
-import { NotImplementedError } from './errors.ts';
 
 let active: Router | null = null;
 
@@ -27,14 +26,26 @@ export async function goto(href: string | URL, opts: GotoOptions = {}): Promise<
   await active.navigate(url, { replace: opts.replaceState ?? false, state: opts.state });
 }
 
-/** 얕은 라우팅(D-5). 1차 범위 밖이라 호출하면 미구현 에러를 던진다. */
-export function replaceState(_href: string | URL | '', _state: Record<string, unknown>): void {
-  throw new NotImplementedError('replaceState(얕은 라우팅)', 'gk-dash 전환 티켓에서 채운다.');
+/**
+ * 얕은 라우팅(D-5). 현재 history 항목의 주소와 state 를 바꾸고 `page.state` 만 갱신한다.
+ * `page.url` 은 그대로이고 load·컴포넌트는 건드리지 않는다. `''` 이면 주소는 그대로 둔다.
+ */
+export function replaceState(href: string | URL | '', state: Record<string, unknown>): void {
+  if (!active) {
+    throw new Error('[eolgae] replaceState 는 mount() 뒤에 호출해야 합니다.');
+  }
+  active.replaceState(href, state);
 }
 
-/** 현재 라우트의 load 재실행. 1차 범위 밖이라 호출하면 미구현 에러를 던진다. */
+/**
+ * 현재 라우트의 load 를 현재 `page.url` 로 다시 실행해 `data`·`page.data` 를 바꾼다. 컴포넌트는 바꾸지 않는다.
+ * 같은 틱의 여러 호출은 한 번으로 묶이고, `page.state` 는 비워진다(SvelteKit 과 같음).
+ */
 export async function invalidateAll(): Promise<void> {
-  throw new NotImplementedError('invalidateAll', 'gk-dash 전환 티켓에서 채운다.');
+  if (!active) {
+    throw new Error('[eolgae] invalidateAll 은 mount() 뒤에 호출해야 합니다.');
+  }
+  await active.invalidateAll();
 }
 
 /** 가로채기 판단에 필요한 만큼만 뽑은 링크 정보. DOM 없이도 만들 수 있어 테스트가 쉽다. */
